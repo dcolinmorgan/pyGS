@@ -1,0 +1,4 @@
+jatnipy
+jatnipy/Methods
+jatnipy/analyse
+jatnipy/datastruct

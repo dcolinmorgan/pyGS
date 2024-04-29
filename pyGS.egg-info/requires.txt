@@ -1,0 +1,11 @@
+cvxpy
+glmnet_py
+matplotlib
+networkx
+numpy
+pandas
+prettytable
+py-ubjson
+requests
+scikit-learn
+scipy
