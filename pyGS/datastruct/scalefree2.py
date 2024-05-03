@@ -1,7 +1,8 @@
 import numpy as np
 import networkx as nx
+from tqdm import tqdm
 
-def scalefree2(N, S, alpha=1.2, pasign=0.62):
+def scalefree2(N, S, alpha=1.2, pasign=0.62, max_attempts=1000):
     """
     Create a scalefree network with N nodes and specific sparsity.
     Args:
@@ -24,24 +25,30 @@ def scalefree2(N, S, alpha=1.2, pasign=0.62):
     # List of all nodes
     node_list = list(G.nodes)
 
-    # Main loop to add new links
-    while len(G.edges) < S * N * (N - 1) / 2:  # Correcting the sparsity calculation
-        degrees = np.array([G.degree(n) for n in node_list])
-        prob = (degrees ** alpha) / np.sum(degrees ** alpha)
+    target_edges = int(S * N * (N - 1) / 2)
+    attempts = 0
 
-        # Normalize probability distribution to avoid potential floating-point inaccuracies
-        prob /= prob.sum()
+    # Main loop to add new links, with progress bar and attempt limit
+    with tqdm(total=target_edges, desc="Building network") as pbar:
+        while len(G.edges) < target_edges and attempts < max_attempts:
+            degrees = np.array([G.degree(n) for n in node_list])
+            prob = (degrees ** alpha) / np.sum(degrees ** alpha)
 
-        # Choose a node based on the calculated probabilities
-        new_link = np.random.choice(node_list, p=prob)
+            # Normalize probability distribution to avoid potential floating-point inaccuracies
+            prob /= prob.sum()
 
-        # Choose another node, ensuring no self-loop
-        possible_nodes = [n for n in node_list if n != new_link]
-        another_node = np.random.choice(possible_nodes)
+            # Choose a node based on the calculated probabilities
+            new_link = np.random.choice(node_list, p=prob)
 
-        # Add the new link if it's unique
-        if not G.has_edge(new_link, another_node):
-            G.add_edge(new_link, another_node, weight=(np.random.rand() < pasign) * 2 - 1)
+            # Choose another node, ensuring no self-loop
+            possible_nodes = [n for n in node_list if n != new_link]
+            another_node = np.random.choice(possible_nodes)
+
+            # Add the new link if it's unique
+            if not G.has_edge(new_link, another_node):
+                G.add_edge(new_link, another_node, weight=(np.random.rand() < pasign) * 2 - 1)
+                pbar.update(1)
+            attempts += 1
 
     # Convert graph to adjacency matrix
     A = nx.to_numpy_array(G, nodelist=range(N), weight='weight')

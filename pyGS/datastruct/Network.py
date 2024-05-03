@@ -22,7 +22,7 @@ _database = "https://bitbucket.org/api/2.0/repositories/sonnhammergrni/gs-networ
 
 class Network():
 	def __init__(self,net = None):
-		if net == None:
+		if net is None:
 			self.name = 0 
 			self.A = []
 			self.G = []

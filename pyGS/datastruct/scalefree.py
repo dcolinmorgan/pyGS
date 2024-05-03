@@ -28,9 +28,11 @@ def scalefree(N,n,*args):
 			k = copy.deepcopy(k)+1
 			if not np.mod(k,100):
 				print('k = %d'%k)
-    m0 = int(m0)
-	tmp = np.zeros((m0*2,m0*2))
-	for i in range(seed.shape[0]):
+    
+    # m0 = int(m0)
+	# tmp = np.zeros((m0*2,m0*2))
+	
+ 	for i in range(seed.shape[0]):
 		tmp[i,i+1:] = seed[i,i:]
 	for i in range(1,seed.shape[0]):
 		tmp[i,:i-1] = seed[i,:i-1]

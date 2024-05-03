@@ -1,6 +1,6 @@
 # JATNIpy #
 
-Justin's, Andrea's, and Torbjörn's network inference package for Python
+fork of Justin's, Andrea's, and Torbjörn's network inference package for Python
 
 [Nordlinglab](https://www.nordlinglab.org/)
 [JATNIpy](https://bitbucket.org/temn/JATNIpy/src/)
