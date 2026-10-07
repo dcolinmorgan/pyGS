@@ -22,6 +22,35 @@ except ImportError:
 from datastruct.Dataset import Dataset
 
 
+def _load_bundled_motif_prior() -> tuple[set[str], dict[tuple[str, str], float]] | None:
+    """Load bundled motif prior (TF-target edges from JASPAR/CIS-BP).
+    
+    Returns
+    -------
+    tuple of (tf_set, motif_edges) or None if file not found
+        tf_set: set of TF names
+        motif_edges: dict mapping (TF, target) -> weight
+    """
+    import gzip
+    motif_path = Path(__file__).parent / "data" / "scenic_motif_prior.txt.gz"
+    if not motif_path.exists():
+        return None
+    
+    tf_set: set[str] = set()
+    motif_edges: dict[tuple[str, str], float] = {}
+    
+    with gzip.open(motif_path, "rt") as f:
+        next(f)  # skip header
+        for line in f:
+            parts = line.strip().split("\t")
+            if len(parts) >= 3:
+                tf, target, weight = parts[0], parts[1], float(parts[2])
+                tf_set.add(tf)
+                motif_edges[(tf, target)] = weight
+    
+    return tf_set, motif_edges
+
+
 def SCENICPLUS(
     dataset: Dataset | None = None,
     work_dir: str | None = None,
@@ -471,7 +500,26 @@ def _run_scenicplus_direct(
     threshold_range: Any = None,
     **kwargs: Any,
 ) -> Any:
-    """Lightweight SCENIC+-inspired implementation with optional arboreto."""
+    """SCENIC+-inspired GRN inference with bundled motif prior.
+    
+    Uses a bundled motif prior (652 TFs, ~40K TF-target edges from JASPAR/CIS-BP)
+    for TF detection and edge weighting, bringing it closer to true SCENIC+.
+    
+    TF detection priority:
+    1. cisTopic object (if provided) - from user's ATAC-seq analysis
+    2. Bundled motif prior (default)
+    3. Heuristic pattern matching (fallback)
+    
+    Edge weighting:
+    1. GBM-inferred importance scores (base)
+    2. Motif prior weights (multiplicative boost for edges with TF motif support)
+    3. Enhancer-gene links from cisTopic (boost targets with ATAC-seq enhancer support)
+    
+    To reproduce SCENIC+ more closely, users can:
+    1. Run pycisTopic on their ATAC-seq data to build a cisTopic object
+    2. Pass that object via cisTopic_obj_fname parameter
+    3. This provides TF list + enhancer-gene links from real chromatin accessibility
+    """
 
     if use_arboreto:
         return _run_with_arboreto(
@@ -515,26 +563,53 @@ def _run_scenicplus_direct(
         else:
             var_names = [f"Gene_{i}" for i in range(Y.shape[0])]
 
-    # Load cisTopic object for TF list
+    # Load bundled motif prior (652 TFs, ~40K edges)
+    motif_data = _load_bundled_motif_prior()
+    if motif_data is not None:
+        motif_tfs, motif_edges = motif_data
+    else:
+        motif_tfs, motif_edges = set(), {}
+    
+    # Load cisTopic object for TF list and enhancer-gene links
+    enhancer_gene_links: dict[tuple[str, str], float] = {}
     if cisTopic_obj_fname and os.path.exists(cisTopic_obj_fname):
         try:
             with open(cisTopic_obj_fname, "rb") as f:
                 cistopic_obj = pickle.load(f)
             # Extract TF list from cisTopic if available
             tf_list = getattr(cistopic_obj, "tf_names", None)
+            
+            # Extract enhancer-gene links (region_to_gene) if available
+            # These come from ATAC-seq peak-to-gene correlation in SCENIC+
+            region_to_gene = getattr(cistopic_obj, "region_to_gene", None)
+            if region_to_gene is not None:
+                # region_to_gene is typically a DataFrame with columns: region, gene, score
+                if hasattr(region_to_gene, "itertuples"):
+                    for row in region_to_gene.itertuples():
+                        gene = getattr(row, "gene", getattr(row, "target", None))
+                        score = getattr(row, "score", getattr(row, "importance", 1.0))
+                        # We use gene as target; TF will be inferred
+                        if gene:
+                            # Store as (any_tf, gene) -> score for later weighting
+                            enhancer_gene_links[("*", gene)] = float(score)
         except (ImportError, ModuleNotFoundError):
             # pycisTopic has heavy deps (polars) that may not be available
             tf_list = None
     else:
         tf_list = None
 
-    # If no TF list, use common TF pattern or all genes
+    # TF detection priority: cisTopic > bundled motif prior > heuristic
     if tf_list is None:
-        tf_list = [
-            g
-            for g in var_names
-            if any(x in g.upper() for x in ["TF", "FOX", "SOX", "HOX", "ZNF", "KLF"])
-        ]
+        if motif_tfs:
+            # Use TFs from bundled motif prior (intersected with genes in data)
+            tf_list = [g for g in var_names if g in motif_tfs]
+        else:
+            # Fallback to heuristic pattern matching
+            tf_list = [
+                g
+                for g in var_names
+                if any(x in g.upper() for x in ["TF", "FOX", "SOX", "HOX", "ZNF", "KLF"])
+            ]
         if not tf_list:
             tf_list = var_names[
                 : min(100, len(var_names))
@@ -565,6 +640,22 @@ def _run_scenicplus_direct(
         for args in worker_args:
             tf_idx, importances = _infer_targets_worker(args)
             adj_matrix[tf_idx, :] = importances
+
+    # Apply motif prior weighting (edges with motif support get boosted)
+    if motif_edges:
+        for i, tf_name in enumerate(var_names):
+            for j, target_name in enumerate(var_names):
+                if (tf_name, target_name) in motif_edges:
+                    # Boost edges with motif support (multiplicative)
+                    adj_matrix[i, j] *= (1.0 + motif_edges[(tf_name, target_name)])
+    
+    # Apply enhancer-gene link weighting from cisTopic ATAC-seq
+    if enhancer_gene_links:
+        for j, target_name in enumerate(var_names):
+            if ("*", target_name) in enhancer_gene_links:
+                # Boost all edges TO this target (it has enhancer support)
+                score = enhancer_gene_links[("*", target_name)]
+                adj_matrix[:, j] *= (1.0 + score)
 
     if cleanup:
         shutil.rmtree(work_dir, ignore_errors=True)
