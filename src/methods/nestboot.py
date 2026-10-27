@@ -1,4 +1,6 @@
 import logging
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Union
@@ -682,20 +684,45 @@ class Nestboot:
             results: NetworkResults object
             txt_file: Path to the text file to be written
         """
+        def _fmt_metric(value: object) -> str:
+            if isinstance(value, (list, tuple, np.ndarray)):
+                vals = np.atleast_1d(np.asarray(value, dtype=object)).ravel()
+                parts = []
+                for v in vals:
+                    try:
+                        parts.append(f"{float(v):.3f}")
+                    except (TypeError, ValueError):
+                        parts.append(str(v))
+                return "[" + ", ".join(parts) + "]"
+            return f"{float(value):.3f}"
+
+        def _write_array(handle, value: object) -> None:
+            try:
+                arr = np.asarray(value, dtype=float)
+            except (TypeError, ValueError):
+                handle.write(f"{value}\n")
+                return
+            if arr.ndim == 0:
+                handle.write(f"{float(arr):.4f}\n")
+            elif arr.size == 0:
+                handle.write("\n")
+            else:
+                np.savetxt(handle, arr if arr.ndim > 1 else arr[np.newaxis, :], fmt="%.4f")
+
         with open(txt_file, "w") as f:
             f.write("Network Bootstrap FDR Analysis Results\n")
             f.write("=" * 40 + "\n")
             f.write(f"Orig Index: {results.orig_index}\n")
-            f.write(f"FP Rate: {results.fp_rate:.3f}\n")
-            f.write(f"Support Threshold: {results.support:.3f}\n")
+            f.write(f"FP Rate: {_fmt_metric(results.fp_rate)}\n")
+            f.write(f"Support Threshold: {_fmt_metric(results.support)}\n")
             f.write(f"xnet shape: {results.xnet.shape}\n")
             f.write(f"ssum shape: {results.ssum.shape}\n")
             f.write(f"min_ab shape: {results.min_ab.shape}\n")
             f.write(f"sxnet shape: {results.sxnet.shape}\n")
             f.write("Accumulated (first 5 rows):\n")
-            np.savetxt(f, results.accumulated[:5], fmt="%.4f")
+            _write_array(f, results.accumulated[:5] if results.accumulated is not None else [])
             f.write("\nBinned frequencies:\n")
-            np.savetxt(f, np.asarray(results.binned_freq)[np.newaxis, :], fmt="%.4f")
+            _write_array(f, results.binned_freq)
 
     def plot_analysis_results(
         self, merged: pd.DataFrame, plot_file: Path, bins: int = 10
@@ -842,6 +869,46 @@ class Nestboot:
         self.logger.info(f"Computed network density for {len(result_df)} runs")
         return result_df
 
+    def _frames_from_counts(
+        self,
+        presence: np.ndarray,
+        positive: np.ndarray,
+        weights: np.ndarray,
+        names: list[str],
+        total_runs: int,
+        suffix: str,
+    ) -> pd.DataFrame:
+        """Turn per-edge counts into the aggregated NestBoot table."""
+        frames = []
+        for p in range(presence.shape[2]):
+            rows, cols = np.nonzero(presence[:, :, p])
+            if len(rows) == 0:
+                continue
+            pres = presence[rows, cols, p].astype(float)
+            frames.append(
+                pd.DataFrame(
+                    {
+                        "param_idx": p,
+                        "gene_i": [names[i] for i in rows],
+                        "gene_j": [names[j] for j in cols],
+                        f"Afrac_{suffix}": pres / total_runs,
+                        f"Asign_frac_{suffix}": positive[rows, cols, p] / pres,
+                        f"Aavg_{suffix}": weights[rows, cols, p] / total_runs,
+                    }
+                )
+            )
+        columns = [
+            "param_idx",
+            "gene_i",
+            "gene_j",
+            f"Afrac_{suffix}",
+            f"Asign_frac_{suffix}",
+            f"Aavg_{suffix}",
+        ]
+        if not frames:
+            return pd.DataFrame(columns=columns)
+        return pd.concat(frames, ignore_index=True)
+
     def run_nestboot(
         self,
         dataset: Any,
@@ -877,9 +944,6 @@ class Nestboot:
 
         np.random.seed(seed)
 
-        bootstrap_data = []
-        shuffled_data = []
-
         # Access underlying Dataset object
         if hasattr(dataset, "Y") and dataset.Y is not None:
             ds_obj = dataset
@@ -901,187 +965,106 @@ class Nestboot:
         original_Y = ds_obj.Y.copy()
         original_P = ds_obj.P.copy()
 
-        for outer_run in range(nest_runs):
-            self.logger.info(f"NestBoot outer run {outer_run + 1}/{nest_runs}")
+        total_runs = nest_runs * boot_runs
+        boot_indices = [
+            np.random.choice(n_samples, size=n_samples, replace=True)
+            for _ in range(total_runs)
+        ]
+        shuffle_indices = [np.random.permutation(n_samples) for _ in range(total_runs)]
 
-            for boot_run in range(boot_runs):
+        from datastruct.Dataset import Dataset
+        from threadpoolctl import threadpool_limits
+
+        def _call(data_obj: Data) -> np.ndarray:
+            if callable(inference_method) and method_params:
+                result = inference_method(data_obj, **method_params)
+            else:
+                result = inference_method(data_obj, **method_kwargs)
+            if isinstance(result, tuple):
+                result = result[0]
+            return np.asarray(result, dtype=float)
+
+        def _wrap(Y: np.ndarray, P: np.ndarray) -> Data:
+            obj = Dataset()
+            obj._Y = Y
+            obj._P = P
+            obj._network = getattr(ds_obj, "_network", None)
+            obj._names = getattr(ds_obj, "_names", None)
+            obj._E = getattr(ds_obj, "_E", None)
+            obj._lambda = getattr(ds_obj, "_lambda", None)
+            obj._dataset_name = getattr(ds_obj, "_dataset_name", "Bootstrap")
+            return Data(obj)
+
+        def _one(i: int) -> tuple[np.ndarray, np.ndarray]:
+            with threadpool_limits(limits=1):
+                boot = _wrap(
+                    original_Y[:, boot_indices[i]].copy(),
+                    original_P[:, boot_indices[i]].copy(),
+                )
+                shuffled = _wrap(original_Y[:, shuffle_indices[i]].copy(), original_P)
+                return _call(boot), _call(shuffled)
+
+        def _add(
+            mat: np.ndarray,
+            presence: np.ndarray | None,
+            positive: np.ndarray | None,
+            weight: np.ndarray | None,
+        ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+            arr = np.asarray(mat, dtype=float)
+            if arr.ndim == 2:
+                arr = arr[:, :, None]
+            if presence is None:
+                presence = np.zeros(arr.shape, dtype=np.int32)
+                positive = np.zeros(arr.shape, dtype=np.int32)
+                weight = np.zeros(arr.shape, dtype=float)
+            elif arr.shape != presence.shape:
+                raise ValueError(f"Inference shape {arr.shape} != {presence.shape}")
+            present = np.abs(arr) > 1e-6
+            diag = np.arange(arr.shape[0])
+            present[diag, diag, :] = False
+            presence += present
+            positive += (arr > 0) & present
+            weight += np.where(present, arr, 0.0)
+            return presence, positive, weight
+
+        n_workers = min(os.cpu_count() or 1, max(total_runs, 1))
+        presence_n = positive_n = weight_n = None
+        presence_s = positive_s = weight_s = None
+        done = 0
+        failures = 0
+        step = max(1, total_runs // 20)
+        with ThreadPoolExecutor(max_workers=n_workers) as pool:
+            futures = [pool.submit(_one, i) for i in range(total_runs)]
+            for fut in as_completed(futures):
                 try:
-                    # Bootstrap
-                    bootstrap_indices = np.random.choice(
-                        n_samples, size=n_samples, replace=True
-                    )
-
-                    # Create a new Dataset object with bootstrapped data
-                    from datastruct.Dataset import Dataset
-
-                    bootstrap_dataset_obj = Dataset()
-                    bootstrap_dataset_obj._Y = original_Y[:, bootstrap_indices]
-                    bootstrap_dataset_obj._P = original_P[:, bootstrap_indices]
-                    bootstrap_dataset_obj._network = getattr(ds_obj, "_network", None)
-                    bootstrap_dataset_obj._names = getattr(ds_obj, "_names", None)
-                    bootstrap_dataset_obj._E = getattr(ds_obj, "_E", None)
-                    bootstrap_dataset_obj._lambda = getattr(ds_obj, "_lambda", None)
-                    bootstrap_dataset_obj._dataset_name = getattr(
-                        ds_obj, "_dataset_name", "Bootstrap"
-                    )
-                    bootstrap_dataset = Data(bootstrap_dataset_obj)
-
-                    # Run inference
-                    if callable(inference_method) and method_params:
-                        # Method is a class/function, call it with method_params
-                        network_result = inference_method(
-                            bootstrap_dataset, **method_params
-                        )
-                    else:
-                        # Method is a callable function, call it with method_kwargs
-                        network_result = inference_method(
-                            bootstrap_dataset, **method_kwargs
-                        )
-
-                    # Handle different return types (tuple or just network)
-                    if isinstance(network_result, tuple):
-                        network_matrix = network_result[0]
-                    else:
-                        network_matrix = network_result
-
-                    # Handle 3D array or 2D array and extract links
-
-                    if hasattr(network_matrix, "ndim") and network_matrix.ndim == 3:
-                        # 3D array: (genes, genes, params)
-                        n_params = network_matrix.shape[2]
-                        for p in range(n_params):
-                            mat = network_matrix[:, :, p]
-                            rows, cols = np.where(np.abs(mat) > 1e-6)
-                            # Remove diagonal
-                            mask = rows != cols
-                            rows, cols = rows[mask], cols[mask]
-                            vals = mat[rows, cols]
-
-                            for r, c, v in zip(rows, cols, vals):
-                                bootstrap_data.append(
-                                    {
-                                        "gene_i": gene_names_list[r],
-                                        "gene_j": gene_names_list[c],
-                                        "run": outer_run * boot_runs
-                                        + boot_run,  # Unique run ID
-                                        "link_value": v,
-                                        "param_idx": p,
-                                    }
-                                )
-                    else:
-                        # 2D case
-                        mat = network_matrix
-                        rows, cols = np.where(np.abs(mat) > 1e-6)
-                        mask = rows != cols
-                        rows, cols = rows[mask], cols[mask]
-                        vals = mat[rows, cols]
-
-                        for r, c, v in zip(rows, cols, vals):
-                            bootstrap_data.append(
-                                {
-                                    "gene_i": gene_names_list[r],
-                                    "gene_j": gene_names_list[c],
-                                    "run": outer_run * boot_runs
-                                    + boot_run,  # Unique run ID
-                                    "link_value": v,
-                                    "param_idx": 0,
-                                }
-                            )
-
-                    # Shuffle: break Y-P correspondence by shuffling samples only.
-                    # IMPORTANT: Only shuffle columns (samples), NOT rows (genes).
-                    # Shuffling genes destroys gene identity and makes the null
-                    # distribution meaningless. The MATLAB implementation only
-                    # permutes the sample axis.
-                    shuffle_indices = np.random.permutation(n_samples)
-
-                    shuffled_dataset_obj = Dataset()
-                    shuffled_dataset_obj._Y = original_Y[:, shuffle_indices]
-                    shuffled_dataset_obj._P = original_P  # Keep P fixed
-
-                    shuffled_dataset_obj._network = ds_obj._network
-                    shuffled_dataset_obj._names = ds_obj._names
-                    shuffled_dataset_obj._E = ds_obj._E
-                    shuffled_dataset_obj._lambda = ds_obj._lambda
-                    shuffled_dataset_obj._dataset_name = ds_obj._dataset_name
-                    shuffled_dataset = Data(shuffled_dataset_obj)
-
-                    # Run inference on shuffled data
-                    if callable(inference_method) and method_params:
-                        # Method is a class/function, call it with method_params
-                        shuffled_result = inference_method(
-                            shuffled_dataset, **method_params
-                        )
-                    else:
-                        # Method is a callable function, call it with method_kwargs
-                        shuffled_result = inference_method(
-                            shuffled_dataset, **method_kwargs
-                        )
-
-                    if isinstance(shuffled_result, tuple):
-                        shuffled_network = shuffled_result[0]
-                    else:
-                        shuffled_network = shuffled_result
-
-                    # Store shuffled links
-                    if hasattr(shuffled_network, "ndim") and shuffled_network.ndim == 3:
-                        n_params = shuffled_network.shape[2]
-                        for p in range(n_params):
-                            mat = shuffled_network[:, :, p]
-                            rows, cols = np.where(np.abs(mat) > 1e-6)
-                            mask = rows != cols
-                            rows, cols = rows[mask], cols[mask]
-                            vals = mat[rows, cols]
-                            for r, c, v in zip(rows, cols, vals):
-                                shuffled_data.append(
-                                    {
-                                        "gene_i": gene_names_list[r],
-                                        "gene_j": gene_names_list[c],
-                                        "run": outer_run * boot_runs
-                                        + boot_run,  # Unique run ID
-                                        "link_value": v,
-                                        "param_idx": p,
-                                    }
-                                )
-                    else:
-                        mat = shuffled_network
-                        rows, cols = np.where(np.abs(mat) > 1e-6)
-                        mask = rows != cols
-                        rows, cols = rows[mask], cols[mask]
-                        vals = mat[rows, cols]
-                        for r, c, v in zip(rows, cols, vals):
-                            shuffled_data.append(
-                                {
-                                    "gene_i": gene_names_list[r],
-                                    "gene_j": gene_names_list[c],
-                                    "run": outer_run * boot_runs
-                                    + boot_run,  # Unique run ID
-                                    "link_value": v,
-                                    "param_idx": 0,
-                                }
-                            )
-
-                except Exception as e:
-                    self.logger.error(f"Bootstrap iteration failed: {e}")
-                    import traceback
-
-                    traceback.print_exc()
+                    boot_mat, shuf_mat = fut.result()
+                except Exception as exc:
+                    failures += 1
+                    self.logger.error(f"Bootstrap iteration failed: {exc}")
                     continue
+                presence_n, positive_n, weight_n = _add(
+                    boot_mat, presence_n, positive_n, weight_n
+                )
+                presence_s, positive_s, weight_s = _add(
+                    shuf_mat, presence_s, positive_s, weight_s
+                )
+                done += 1
+                if done == 1 or done % step == 0 or done == total_runs:
+                    print(f"  NestBoot {done}/{total_runs}", flush=True)
 
-        # Convert to DataFrames
-        normal_df = pd.DataFrame(bootstrap_data)
-        shuffled_df = pd.DataFrame(shuffled_data)
-
-        if len(normal_df) == 0:
+        if presence_n is None or presence_s is None:
             raise ValueError("No bootstrap data generated")
+        if failures:
+            self.logger.warning(f"{failures} bootstrap iterations failed")
 
-        # Run NB-FDR analysis
-        return self.nb_fdr(
-            normal_df=normal_df,
-            shuffled_df=shuffled_df,
-            init=nest_runs * boot_runs,  # Total runs is now product of nested loops
-            data_dir=Path("."),
-            fdr=self.config.fdr_threshold if hasattr(self, "config") else 0.05,
-            boot=boot_runs,
-            node_names=gene_names_list,
+        normal_df = self._frames_from_counts(
+            presence_n, positive_n, weight_n, gene_names_list, total_runs, "norm"
         )
+        shuffled_df = self._frames_from_counts(
+            presence_s, positive_s, weight_s, gene_names_list, total_runs, "shuf"
+        )
+        merged = pd.merge(
+            normal_df, shuffled_df, on=["param_idx", "gene_i", "gene_j"], how="outer"
+        ).fillna(0)
+        fdr = self.config.fdr_threshold if hasattr(self, "config") else 0.05
+        return self._compute_network_metrics(merged, fdr, gene_names_list)

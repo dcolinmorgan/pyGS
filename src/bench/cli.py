@@ -9,9 +9,11 @@ Usage::
     pygs status                                  # system info
     pygs methods                                 # list inference methods
     pygs infer data.csv -m lasso                 # infer a GRN
+    pygs infer https://example/ymatrix.csv -m lsco
     pygs bench --tier fast                       # synthetic benchmark
     pygs bench-gs --tier fast --sizes N50        # GeneSpider benchmark
-    pygs nestboot data.csv -m lasso              # NestBoot FDR analysis
+    pygs nestboot data.csv -m lsco -i 100 -o 100
+    pygs nestboot --runs 100x100 -m lsco -f data.csv --output out.npy
     pygs evaluate pred.npy --gold gold.npy       # evaluate against gold standard
     pygs plot pred.npy --genes genes.txt         # plot a GRN
     pygs dashboard -i results.json               # HTML dashboard
@@ -404,12 +406,12 @@ def _cmd_infer(args: argparse.Namespace) -> None:
     from sparselink import get_method
 
     import sparselink.methods  # noqa: F401
-    from bio.io import load_expression
+    from bio.io import PERTURBATION_METHODS, load_inference_inputs
 
     path = Path(args.file)
     try:
-        X, feature_names = load_expression(str(path))
-    except (ValueError, ImportError) as e:
+        X, feature_names, P = load_inference_inputs(args.file)
+    except (ValueError, ImportError, OSError) as e:
         console.print(f"  [{ROSE}]{e}[/]")
         return
 
@@ -417,11 +419,16 @@ def _cmd_infer(args: argparse.Namespace) -> None:
         f"  [{TEAL}]Data[/]    {path.name}:"
         f" {X.shape[0]} samples × {X.shape[1]} features"
     )
+    if P is not None:
+        console.print(
+            f"  [{TEAL}]Design[/]  knockdown labels → perturbation matrix"
+        )
     console.print(f"  [{TEAL}]Method[/]  {args.method}")
 
     method = get_method(args.method)
+    fit_P = P if args.method in PERTURBATION_METHODS else None
     with console.status(f"[{TEAL}]Running {args.method}...[/]"):
-        result = method().fit(X)
+        result = method().fit(X, fit_P)
 
     adj = result.adjacency_matrix
 
@@ -1113,13 +1120,18 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
 
     import sparselink.methods  # noqa: F401
 
-    from bio.preprocessing import load_expression_matrix
+    from bio.io import PERTURBATION_METHODS, load_inference_inputs
     from config import AnalysisConfig
     from methods.nestboot import Nestboot
 
-    # Load expression data
+    # Load expression data. X is samples × genes; Dataset wants genes × samples.
     console.print(f"  [{TEAL}]Loading[/]  {args.file}")
-    matrix, gene_names = load_expression_matrix(args.file)
+    try:
+        X, gene_names, P = load_inference_inputs(args.file)
+    except (ValueError, ImportError, OSError) as e:
+        console.print(f"  [{ROSE}]{e}[/]")
+        return
+    matrix = X.T
     n_genes, n_samples = matrix.shape
     console.print(f"  [{DIM}]{n_genes} genes × {n_samples} samples[/]")
 
@@ -1130,7 +1142,13 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
 
     ds = Dataset()
     ds._Y = matrix
-    ds._P = np.eye(n_genes, n_samples)
+    if P is not None:
+        ds._P = P.T
+        console.print(
+            f"  [{TEAL}]Design[/]  knockdown labels → perturbation matrix"
+        )
+    else:
+        ds._P = np.eye(n_genes, n_samples)
     ds._network = Network(np.zeros((n_genes, n_genes)))
     ds._names = gene_names
     data_obj = Data(ds)
@@ -1145,12 +1163,34 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
 
     method_cls = get_method(method_name)
 
+    use_P = method_name in PERTURBATION_METHODS
+
     def _infer(dataset: Data, **kwargs: object) -> np.ndarray:
         """Run sparselink method on a pyGS Data object."""
         Y = dataset.data.Y  # type: ignore[union-attr]
         X = Y.T  # sparselink expects (samples × features)
-        result = method_cls().fit(X)
-        return result.adjacency_matrix
+        fit_P = None
+        if use_P:
+            P_mat = dataset.data.P  # type: ignore[union-attr]
+            fit_P = None if P_mat is None else P_mat.T
+        result = method_cls().fit(X, fit_P)
+        adj = result.adjacency_matrix
+        # LSCO (and other dense fits) need a cutoff sweep so NestBoot scores
+        # edge presence instead of every least-squares coefficient.
+        scores = np.abs(adj)
+        np.fill_diagonal(scores, 0.0)
+        nonzero = scores[scores > 0]
+        if nonzero.size == 0:
+            return adj
+        thresholds = np.unique(np.quantile(nonzero, np.linspace(0.5, 0.95, 8)))
+        slices = []
+        for thr in thresholds:
+            masked = adj.copy()
+            masked[scores < thr] = 0.0
+            slices.append(masked)
+        if len(slices) == 1:
+            return slices[0]
+        return np.stack(slices, axis=2)
 
     # Run NestBoot
     config = AnalysisConfig(
@@ -1386,19 +1426,43 @@ _MENU = {
 def _interactive_infer() -> None:
     """Infer with data source selection: user file, GeneSpider, or synthetic."""
     console.print(f"\n  [{TEAL}]Data source:[/]")
-    console.print(f"    [{INDIGO}]1[/] [{DIM}]Your data file (.csv, .tsv, .npy)[/]")
+    console.print(f"    [{INDIGO}]1[/] [{DIM}]Your data file or URL (.csv, .tsv, .txt, .npy)[/]")
     console.print(f"    [{INDIGO}]2[/] [{DIM}]GeneSpider benchmark dataset[/]")
     console.print(f"    [{INDIGO}]3[/] [{DIM}]Generate synthetic network + data[/]")
 
     src = Prompt.ask(f"  [{DIM}]Source[/]", choices=["1", "2", "3"], default="1")
 
     if src == "1":
-        fpath = Prompt.ask(f"  [{DIM}]Data file (.csv, .tsv, .npy)[/]")
+        fpath = Prompt.ask(f"  [{DIM}]Data file or URL[/]")
         method = Prompt.ask(f"  [{DIM}]Method[/]", default="lasso")
-        out = Prompt.ask(f"  [{DIM}]Output (.npy)[/]", default="")
-        _cmd_infer(
-            argparse.Namespace(file=fpath, method=method, output=out or None)
+        use_nb = Prompt.ask(
+            f"  [{DIM}]Wrap with NestBoot?[/]",
+            choices=["y", "n"],
+            default="n",
         )
+        if use_nb == "y":
+            nest_runs = int(Prompt.ask(f"  [{DIM}]Outer runs[/]", default="10"))
+            boot_runs = int(Prompt.ask(f"  [{DIM}]Inner runs[/]", default="10"))
+            fdr = float(Prompt.ask(f"  [{DIM}]FDR[/]", default="0.05"))
+            out = Prompt.ask(f"  [{DIM}]Output (.npy)[/]", default="nestboot.npy")
+            _cmd_nestboot(
+                argparse.Namespace(
+                    file=fpath,
+                    method=method,
+                    nest_runs=nest_runs,
+                    boot_runs=boot_runs,
+                    fdr=fdr,
+                    seed=42,
+                    output=out,
+                )
+            )
+        else:
+            out = Prompt.ask(f"  [{DIM}]Output (.npy)[/]", default="")
+            _cmd_infer(
+                argparse.Namespace(
+                    file=fpath, method=method, output=out or None, directed=False
+                )
+            )
 
     elif src == "2":
         _infer_from_genespider()
@@ -1904,6 +1968,20 @@ def _interactive() -> None:
 # ── CLI entrypoint ────────────────────────────────────────────────────────
 
 
+def _parse_runs(text: str) -> tuple[int, int]:
+    """Parse '100x100', '100*100', or '100,100' as outer, inner."""
+    parts = text.lower().replace("*", "x").replace(",", "x").split("x")
+    if len(parts) != 2:
+        raise SystemExit(f"Expected outerxinner, got {text!r}")
+    try:
+        outer, inner = int(parts[0]), int(parts[1])
+    except ValueError as exc:
+        raise SystemExit(f"Expected outerxinner, got {text!r}") from exc
+    if outer < 1 or inner < 1:
+        raise SystemExit("NestBoot runs must be at least 1")
+    return outer, inner
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="pygs",
@@ -1919,7 +1997,7 @@ def main() -> None:
 
     # infer
     ip = subs.add_parser("infer", help="Infer a network from expression data")
-    ip.add_argument("file", help="Input data (.h5ad, .csv, .tsv, .npy)")
+    ip.add_argument("file", help="Input data or URL (.h5ad, .csv, .tsv, .txt, .npy)")
     ip.add_argument("-m", "--method", default="lasso", help="Inference method")
     ip.add_argument(
         "-o", "--output", default=None, help="Save adjacency as .npy"
@@ -1963,23 +2041,53 @@ def main() -> None:
 
     # nestboot
     nb = subs.add_parser(
-        "nestboot", help="NestBoot FDR analysis on expression data"
+        "nestboot",
+        help="NestBoot FDR analysis on expression data",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            "Flags and the data path can be in any order.\n"
+            "  pygs nestboot data.csv -m lsco -i 100 -o 100\n"
+            "  pygs nestboot --runs 100x100 -m lsco -f data.csv --output out.npy\n"
+            "-i is inner runs, -o is outer runs. The result path is --output."
+        ),
     )
     nb.add_argument(
-        "file", help="Expression data (.csv, .tsv, .h5ad, .npy)"
+        "file",
+        nargs="?",
+        default=None,
+        help="Expression data or URL (.csv, .tsv, .txt, .h5ad, .npy)",
+    )
+    nb.add_argument(
+        "-f", "--file",
+        dest="file_flag",
+        default=None,
+        help="Data file or URL, if you prefer a flag to the positional",
     )
     nb.add_argument(
         "-m", "--method", default="lasso", help="Inference method"
     )
     nb.add_argument(
-        "--nest-runs", type=int, default=10, help="Outer bootstrap runs"
+        "-o", "-n", "--outer", "--nest-runs",
+        dest="nest_runs",
+        type=int,
+        default=10,
+        help="Outer bootstrap runs",
     )
     nb.add_argument(
-        "--boot-runs", type=int, default=10, help="Inner bootstrap runs"
+        "-i", "--inner", "--boot-runs",
+        dest="boot_runs",
+        type=int,
+        default=10,
+        help="Inner bootstrap runs",
+    )
+    nb.add_argument(
+        "--runs",
+        default=None,
+        help="Outer x inner as one token, e.g. 100x100 (overrides -n/-i)",
     )
     nb.add_argument("--fdr", type=float, default=0.05, help="FDR threshold")
     nb.add_argument("--seed", type=int, default=42)
-    nb.add_argument("-o", "--output", default="nestboot.npy")
+    nb.add_argument("--output", default="nestboot.npy", help="Output adjacency .npy")
 
     # evaluate
     ep = subs.add_parser(
@@ -2040,6 +2148,14 @@ def main() -> None:
     elif args.command == "bench-gs":
         _run_genespider_live(args)
     elif args.command == "nestboot":
+        if args.runs:
+            args.nest_runs, args.boot_runs = _parse_runs(args.runs)
+        path = args.file or args.file_flag
+        if args.file and args.file_flag and args.file != args.file_flag:
+            parser.error("pass the data file only once")
+        if not path:
+            parser.error("nestboot needs a data file or URL")
+        args.file = path
         _cmd_nestboot(args)
     elif args.command == "evaluate":
         _cmd_evaluate(args)
