@@ -11,6 +11,8 @@ Usage::
     pygs infer data.csv -m lasso                 # infer a GRN
     pygs infer https://example/ymatrix.csv -m lsco
     pygs bench --tier fast                       # synthetic benchmark
+    pygs bench --methods tigress,lasso,lsco --nestboot --randomize \
+        --snr 0.01,0.1,1 --n-nodes 50 --n-datasets 3 --plot
     pygs bench-gs --tier fast --sizes N50        # GeneSpider benchmark
     pygs nestboot data.csv -m lsco -i 100 -o 100
     pygs nestboot --runs 100x100 -m lsco -f data.csv --output out.npy
@@ -507,8 +509,173 @@ def _configure_synthetic() -> argparse.Namespace:
     )
 
 
+def _perturbation_data(true_net: np.ndarray, snr: float, rng: np.random.Generator):
+    """GeneSpider knockdown data: Y = (I-A)^{-1}(P + noise), SNR = var(signal)/var(noise)."""
+    n_genes = true_net.shape[0]
+    n_samples = 3 * n_genes
+    gain = np.linalg.inv(np.eye(n_genes) - true_net)
+    design = np.eye(n_genes, n_samples)
+    signal = gain @ design
+    noise_std = np.sqrt(np.var(signal) / snr) if snr > 0 else 0.01
+    noise = rng.normal(0, noise_std, design.shape)
+    expression = gain @ (design + noise)
+    return expression.T, design.T
+
+
+def _shuffle_genes(X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """Break coexpression by permuting each gene across samples."""
+    shuffled = X.copy()
+    for gene in range(shuffled.shape[1]):
+        rng.shuffle(shuffled[:, gene])
+    return shuffled
+
+
+def _max_over_sparsity(method_name: str, X: np.ndarray, P: np.ndarray | None, true_net: np.ndarray):
+    """Best AUROC, F1 and MCC over the regularization sweep."""
+    from sparselink import get_method
+    from sparselink.bench.metrics import evaluate
+    from bench.genespider import ALPHA_SWEEP, ALPHA_RANGE
+
+    method_cls = get_method(method_name)
+    fit_p = P if method_name == "lsco" else None
+    settings = ALPHA_RANGE if method_name in ALPHA_SWEEP else [None]
+    param = ALPHA_SWEEP.get(method_name)
+    best = {"auroc": -1.0, "f1": -1.0, "mcc": -1.0}
+    for alpha in settings:
+        kwargs = {param: float(alpha)} if param is not None else {}
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            adj = method_cls(**kwargs).fit(X, fit_p).adjacency_matrix
+        metrics = evaluate(true_net, adj)
+        best["auroc"] = max(best["auroc"], metrics.auroc)
+        best["f1"] = max(best["f1"], metrics.f1)
+        best["mcc"] = max(best["mcc"], metrics.mcc)
+    return best
+
+
+def _run_snr_benchmark(args: argparse.Namespace) -> None:
+    """N50-style SNR comparison, optionally with a shuffled-data arm."""
+    from sparselink import list_methods
+    from sparselink.bench.run_benchmark import TIERS
+    from sparselink.bench.synthetic import generate_network
+
+    import sparselink.methods  # noqa: F401
+
+    if getattr(args, "methods", None):
+        methods = [name.strip() for name in args.methods.split(",") if name.strip()]
+    else:
+        methods = []
+        for tier in args.tier.split(","):
+            methods.extend(TIERS.get(tier.strip(), []))
+    registered = set(list_methods())
+    methods = [name for name in methods if name in registered]
+    if not methods:
+        console.print(f"  [{ROSE}]No valid methods selected.[/]")
+        return
+
+    snrs = [float(value) for value in args.snr.split(",") if value.strip()]
+    topologies = [name.strip() for name in args.topologies.split(",") if name.strip()]
+    nestboot_methods = [name for name in methods if name in {"lasso", "lsco"}] if args.nestboot else []
+    arms = methods + ([f"random {name}" for name in methods] if args.randomize else [])
+    arms += [f"nestboot {name}" for name in nestboot_methods]
+    total = len(topologies) * len(snrs) * args.n_datasets * len(arms)
+
+    console.print(f"  [{TEAL}]Methods[/]     {', '.join(arms)}")
+    console.print(f"  [{TEAL}]SNR[/]         {snrs}")
+    console.print(f"  [{TEAL}]Topologies[/]  {topologies}")
+    console.print(f"  [{TEAL}]Networks[/]    {args.n_nodes} genes × {args.n_datasets} per topology")
+    console.print(f"  [{TEAL}]Total runs[/]  {total}")
+    console.print()
+
+    rows: list[dict] = []
+    rng = np.random.default_rng(args.seed)
+    progress = Progress(
+        SpinnerColumn(style=TEAL),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(bar_width=30, complete_style=TEAL, finished_style=GREEN),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        console=console,
+    )
+    with progress:
+        task = progress.add_task("SNR benchmark", total=total)
+        for topology in topologies:
+            for dataset_idx in range(args.n_datasets):
+                true_net = generate_network(
+                    args.n_nodes,
+                    topology=topology,
+                    sparsity=args.sparsity,
+                    seed=int(rng.integers(0, 2**31)),
+                )
+                for snr in snrs:
+                    X, P = _perturbation_data(true_net, snr, rng)
+                    copies = [(False, X)]
+                    if args.randomize:
+                        copies.append((True, _shuffle_genes(X, rng)))
+                    for randomized, expression in copies:
+                        for method_name in methods:
+                            label = f"random {method_name}" if randomized else method_name
+                            progress.update(task, description=f"{label:20s} {topology}/SNR={snr:g}")
+                            scores = _max_over_sparsity(method_name, expression, P, true_net)
+                            rows.append({
+                                "dataset": f"SNR{snr:g}-{topology}-ID{dataset_idx}",
+                                "method": label,
+                                "snr": snr,
+                                "topology": topology,
+                                "auroc": scores["auroc"],
+                                "f1_score": scores["f1"],
+                                "mcc": scores["mcc"],
+                            })
+                            progress.advance(task)
+                    if not args.nestboot:
+                        continue
+                    for method_name in nestboot_methods:
+                        label = f"nestboot {method_name}"
+                        progress.update(task, description=f"{label:20s} {topology}/SNR={snr:g}")
+                        result = _run_nestboot_on_gs(
+                            method_name,
+                            X,
+                            P,
+                            true_net,
+                            {"path": f"SNR{snr:g}-{topology}-ID{dataset_idx}", "n_genes": args.n_nodes, "snr": snr},
+                            topology,
+                            f"{topology}-ID{dataset_idx}",
+                            args,
+                        )
+                        rows.append({
+                            "dataset": f"SNR{snr:g}-{topology}-ID{dataset_idx}",
+                            "method": label,
+                            "snr": snr,
+                            "topology": topology,
+                            "auroc": result.get("auroc", 0),
+                            "f1_score": result.get("f1", 0),
+                            "mcc": result.get("mcc", 0),
+                        })
+                        progress.advance(task)
+
+    csv_path = Path(args.output).with_suffix(".csv")
+    pd = __import__("pandas")
+    pd.DataFrame(rows).to_csv(csv_path, index=False)
+    with open(args.output, "w") as handle:
+        json.dump(rows, handle, indent=2)
+    console.print(f"\n  [{DIM}]Scores saved to {csv_path}[/]")
+    if args.plot:
+        from importlib.util import module_from_spec, spec_from_file_location
+
+        plot_path = Path(__file__).resolve().parents[2] / "benchmark" / "code" / "plot_snr_comparison.py"
+        spec = spec_from_file_location("plot_snr_comparison", plot_path)
+        plotter = module_from_spec(spec)
+        spec.loader.exec_module(plotter)
+        figure = Path(args.output).with_suffix(".png")
+        plotter.plot_scores(plotter.load_scores(csv_path), figure)
+        console.print(f"  [{DIM}]Figure saved to {figure}[/]")
+
+
 def _run_benchmark_live(args: argparse.Namespace) -> None:
     """Run synthetic benchmark using sparselink methods."""
+    if getattr(args, "snr", None):
+        _run_snr_benchmark(args)
+        return
     warnings.simplefilter("ignore")
 
     from sparselink import list_methods
@@ -2009,6 +2176,16 @@ def main() -> None:
     # bench (synthetic)
     bp = subs.add_parser("bench", help="Synthetic benchmark")
     bp.add_argument("--tier", default="fast")
+    bp.add_argument("--methods", default=None, help="Comma-separated methods; overrides --tier")
+    bp.add_argument("--snr", default=None, help="Comma-separated SNRs, e.g. 0.01,0.1,1")
+    bp.add_argument("--topologies", default="random,smallworld,scalefree")
+    bp.add_argument("--sparsity", type=float, default=0.06, help="True-network edge density in SNR mode")
+    bp.add_argument("--randomize", action="store_true", help="Also score each method on gene-wise shuffled data")
+    bp.add_argument("--nestboot", action="store_true", help="Also run NestBoot for lasso and lsco")
+    bp.add_argument("--nest-runs", type=int, default=10)
+    bp.add_argument("--boot-runs", type=int, default=10)
+    bp.add_argument("--fdr", type=float, default=0.05)
+    bp.add_argument("--plot", action="store_true", help="Write the SNR boxplot next to the output JSON")
     bp.add_argument("--n-nodes", type=int, default=50)
     bp.add_argument("--n-samples", type=int, default=200)
     bp.add_argument("--n-datasets", type=int, default=5)
