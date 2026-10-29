@@ -1,10 +1,11 @@
 """Benchmark inference against GeneSPIDER true networks.
 
 ``pygs bench --snr`` loads the network JSON as the true GRN and the dataset
-JSON as the knockdown design. A requested SNR uses the stored expression
-when that SNR is already in a file. Otherwise expression is simulated from
-the same network and the same design, at that SNR. Every inferred network
-is written next to the score table.
+JSON as the expression and knockdown design. Only stored GeneSPIDER files
+are used. The N50 collection has three levels, SNR_L 0.01, 1, and 100,
+stored under filenames SNR10, SNR1000, and SNR100000. A requested SNR with
+no matching file stops the run. Every inferred network is written next to
+the score table.
 """
 
 from __future__ import annotations
@@ -316,7 +317,7 @@ def _checkpoint(rows: list[dict], csv_path: Path, json_path: Path) -> None:
 
 
 def run_snr_benchmark(args: argparse.Namespace) -> None:
-    from bench.cli import DIM, GREEN, ORANGE, ROSE, TEAL, _write_snr_figure, console
+    from bench.cli import DIM, GREEN, ROSE, TEAL, _write_snr_figure, console
     from bench.genespider import select_networks
 
     methods = _methods(args)
@@ -366,19 +367,20 @@ def run_snr_benchmark(args: argparse.Namespace) -> None:
         files = [_read_dataset(meta) for meta in metas]
         network_name = files[0]["network"]
         A = _read_network(network_name)
-        design = max(files, key=lambda record: float(record["snr_l"] or 0.0))
         for snr_index, snr in enumerate(snrs):
             stored = match_snr(snr, files)
             if stored is None:
-                rng = np.random.default_rng(seed + 1000 * network_index + snr_index)
-                Y = simulate_expression(A, design["P"], snr, rng)
-                P = design["P"]
-                source = "simulated"
-                dataset_name = f"{network_name}__snr{_snr_label(snr)}"
-                console.print(
-                    f"  [{ORANGE}]{topology} {network_name} SNR {_snr_label(snr)}[/] "
-                    f"[{DIM}]simulated from the GeneSPIDER network and knockdown design[/]"
+                available = ", ".join(
+                    _snr_label(float(record["snr_l"]))
+                    for record in files
+                    if record.get("snr_l") is not None
                 )
+                console.print(
+                    f"  [{ROSE}]No stored GeneSPIDER file for SNR {_snr_label(snr)}[/] "
+                    f"on {network_name}. Available SNR_L values: {available}. "
+                    "The N50 files are 0.01, 1, and 100 (filenames SNR10, SNR1000, SNR100000)."
+                )
+                raise SystemExit(1)
             else:
                 Y = stored["Y"]
                 P = stored["P"]

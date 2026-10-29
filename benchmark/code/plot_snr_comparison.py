@@ -112,23 +112,23 @@ def plot_scores(frame: pd.DataFrame, output: Path) -> None:
         x="metric",
         y="score",
         hue="method",
-        col="snr",
-        col_order=snrs,
+        row="snr",
+        row_order=snrs,
         kind="box",
         hue_order=present,
         order=[label for _, label in METRICS],
-        height=4.2,
-        aspect=0.9,
+        height=3.4,
+        aspect=2.4,
         sharey=True,
         fliersize=3,
         legend_out=True,
     )
     grid.set_axis_labels("Metric", "Score")
-    grid.set_titles("SNR = {col_name}")
+    grid.set_titles("SNR = {row_name}")
     grid.set(ylim=(-0.05, 1.05))
     grid.figure.suptitle(
         "TIGRESS, LASSO and LSCO, with and without NestBoot",
-        y=1.03,
+        y=1.02,
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     grid.savefig(output, dpi=200, bbox_inches="tight")

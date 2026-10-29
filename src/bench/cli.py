@@ -13,12 +13,13 @@ Usage::
     pygs bench --tier fast                       # synthetic benchmark
     uv run pygs bench --methods tigress,lasso,lsco \
         --nestboot --nest-runs 10 --boot-runs 10 --randomize \
-        --snr 0.01,0.1,1 --topologies random,smallworld,scalefree \
+        --snr 0.01,1,100 --topologies random,smallworld,scalefree \
         --n-nodes 50 --n-datasets 3 \
         --plot -o benchmark/results/snr_figure.json
     uv run pygs bench --plot -o benchmark/results/snr_figure.json
     pygs bench-gs --tier fast --sizes N50        # GeneSpider benchmark
     pygs nestboot data.csv -m lsco -i 100 -o 100
+    pygs plot out.npy --zeta 0.063 --per-gene 3 -o edges.csv
     pygs nestboot --runs 100x100 -m lsco -f data.csv --output out.npy
     pygs evaluate pred.npy --gold gold.npy       # evaluate against gold standard
     pygs plot pred.npy --genes genes.txt         # plot a GRN
@@ -635,8 +636,8 @@ def _configure_snr_figure() -> argparse.Namespace:
     console.print(f"\n  [{TEAL}]Benchmark against GeneSPIDER true networks[/]\n")
     console.print(
         f"  [{DIM}]True networks come from the GeneSPIDER JSON files. "
-        f"A requested SNR uses the stored expression when that file exists, "
-        f"and is simulated from the same network otherwise.[/]"
+        f"Only stored expression is used. The three N50 levels are "
+        f"SNR_L 0.01, 1, and 100.[/]"
     )
     output = Prompt.ask(
         f"  [{DIM}]Output file[/]",
@@ -654,7 +655,7 @@ def _configure_snr_figure() -> argparse.Namespace:
     methods = Prompt.ask(
         f"  [{DIM}]Methods[/]", default="tigress,lasso,lsco"
     )
-    snr = Prompt.ask(f"  [{DIM}]SNR values[/]", default="0.01,0.1,1")
+    snr = Prompt.ask(f"  [{DIM}]SNR values[/]", default="0.01,1,100")
     n_nodes = int(Prompt.ask(f"  [{DIM}]Genes per network[/]", default="50"))
     sizes = f"N{n_nodes}"
     n_datasets = int(
@@ -1513,8 +1514,90 @@ def _cmd_evaluate(args: argparse.Namespace) -> None:
 # ── Plot ──────────────────────────────────────────────────────────────────
 
 
+
+def _cmd_plot_nestboot(args: argparse.Namespace) -> None:
+    """Write edge and node tables for one zeta of a NestBoot stack."""
+    from bio.nestboot_tables import nestboot_tables
+
+    run = Path(args.adjacency)
+    per_gene = None if args.per_gene == 0 else args.per_gene
+    try:
+        edges, nodes, info = nestboot_tables(run, args.zeta, per_gene)
+    except FileNotFoundError as exc:
+        console.print(f"  [{ROSE}]{exc}[/]")
+        raise SystemExit(1)
+
+    suffix = "_3pergene" if per_gene else ""
+    if args.output and str(args.output).endswith(".csv"):
+        edges_path = Path(args.output)
+        nodes_path = edges_path.with_name(edges_path.stem + "_nodes.csv")
+    else:
+        stem = run.with_name(f"{run.stem}_zeta{info['zeta']:.3g}{suffix}")
+        edges_path = stem.with_name(stem.name + "_edges.csv")
+        nodes_path = stem.with_name(stem.name + "_nodes.csv")
+    edges_path.parent.mkdir(parents=True, exist_ok=True)
+    edges.to_csv(edges_path, index=False)
+    nodes.to_csv(nodes_path, index=False)
+    status = f"cutoff {info['cutoff']:.2f}" if info["fdr_reached"] else "not FDR-controlled"
+    console.print(
+        f"  [{GREEN}]✓[/] zeta {info['zeta']:.3g}: {info['links']} links, "
+        f"{len(nodes)} genes, {status}"
+    )
+    console.print(f"  [{DIM}]{edges_path}[/]")
+    console.print(f"  [{DIM}]{nodes_path}[/]")
+
+    if not args.graphistry:
+        return
+    try:
+        import os
+        import graphistry
+    except ImportError:
+        console.print("  [{ROSE}]graphistry is not installed. Tables were written.[/]")
+        raise SystemExit(1)
+    server = os.environ.get("GRAPHISTRY_SERVER", "hub.graphistry.com")
+    if os.environ.get("GRAPHISTRY_PERSONAL_KEY_ID"):
+        graphistry.register(
+            api=3, server=server, protocol="https",
+            personal_key_id=os.environ["GRAPHISTRY_PERSONAL_KEY_ID"],
+            personal_key_secret=os.environ["GRAPHISTRY_PERSONAL_KEY_SECRET"],
+        )
+    elif os.environ.get("GRAPHISTRY_USERNAME"):
+        import getpass
+        username = os.environ["GRAPHISTRY_USERNAME"]
+        password = os.environ.get("GRAPHISTRY_PASSWORD") or getpass.getpass(
+            f"Graphistry password for {username}: "
+        )
+        graphistry.register(
+            api=3, server=server, protocol="https", username=username, password=password
+        )
+    else:
+        console.print(
+            "  [{ROSE}]Set GRAPHISTRY_USERNAME or GRAPHISTRY_PERSONAL_KEY_ID. Tables were written.[/]"
+        )
+        raise SystemExit(1)
+    url = (
+        graphistry.edges(edges, "regulator", "target")
+        .nodes(nodes, "gene")
+        .bind(point_title="gene", edge_title="title", edge_weight="mean_support")
+        .encode_edge_color(
+            "sign",
+            categorical_mapping={"activation": "#2e7d32", "repression": "#c62828"},
+        )
+        .encode_point_color(
+            "knockdown",
+            categorical_mapping={"ok": "#1f5aa6", "failed (removed)": "#f39c12"},
+        )
+        .encode_point_size("out_degree")
+        .plot(render="url")
+    )
+    console.print(f"  [{TEAL}]{url}[/]")
+
+
 def _cmd_plot(args: argparse.Namespace) -> None:
     """Plot a gene regulatory network."""
+    if args.zeta is not None:
+        _cmd_plot_nestboot(args)
+        return
     from bio.visualization import plot_grn
 
     adj_path = Path(args.adjacency)
@@ -2245,8 +2328,9 @@ def main() -> None:
         epilog=(
             "Compare inferred networks to GeneSPIDER true networks. The true\n"
             "network and knockdown design come from the GeneSPIDER JSON files.\n"
-            "Expression at a requested SNR is the stored dataset when that SNR\n"
-            "is in the files, and is simulated from the same network otherwise.\n"
+            "Only stored GeneSPIDER expression is used. The three N50 levels\n"
+            "are SNR_L 0.01, 1, and 100 (filenames SNR10, SNR1000, SNR100000).\n"
+            "A value with no matching file stops the run.\n"
             "--randomize also scores each method on gene-wise shuffled\n"
             "expression. --nestboot adds NestBoot for lasso and lsco.\n"
             "\n"
@@ -2254,7 +2338,7 @@ def main() -> None:
             "    --methods tigress,lasso,lsco \\\n"
             "    --nestboot --nest-runs 10 --boot-runs 10 \\\n"
             "    --randomize \\\n"
-            "    --snr 0.01,0.1,1 \\\n"
+            "    --snr 0.01,1,100 \\\n"
             "    --topologies random,smallworld,scalefree \\\n"
             "    --n-nodes 50 --n-datasets 3 \\\n"
             "    --plot -o benchmark/results/snr_figure.json\n"
@@ -2274,7 +2358,7 @@ def main() -> None:
     bp.add_argument(
         "--snr",
         default=None,
-        help="Comma-separated SNRs. Stored GeneSPIDER expression is used when present; other values are simulated from the GeneSPIDER network",
+        help="Comma-separated SNR_L values. N50 files are 0.01, 1, and 100. A value with no stored file stops the run",
     )
     bp.add_argument("--sizes", default="N50", help="GeneSPIDER size to load, e.g. N50")
     bp.add_argument("--topologies", default="random,smallworld,scalefree")
@@ -2394,7 +2478,20 @@ def main() -> None:
         help="Min edge weight to display",
     )
     pp.add_argument(
-        "-o", "--output", default=None, help="Output image path"
+        "-o", "--output", default=None,
+        help="Output image, or a .csv path for the NestBoot edge table",
+    )
+    pp.add_argument(
+        "--zeta", type=float, default=None,
+        help="NestBoot sparsity. Writes edge and node tables from the .npy stack",
+    )
+    pp.add_argument(
+        "--per-gene", type=float, default=3.0,
+        help="With --zeta, keep the highest-support links nearest this density. 0 keeps the full FDR network",
+    )
+    pp.add_argument(
+        "--graphistry", action="store_true",
+        help="With --zeta, also upload the tables and print a Graphistry URL",
     )
 
     # show
