@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Plot the SNR benchmark table as boxplots.
 
-Reads the CSV written by ``python_benchmark_snr_all_methods.py`` (or the
-MATLAB twin). Each row must already be one network: F1 and MCC are the best
-score over the sparsity/zeta sweep, and AUROC is from the continuous scores.
+Reads the CSV written by ``pygs bench``. A row may be one regularization
+setting. AUROC is the threshold-free score of the setting with the best F1.
+F1 and MCC are still the best values over the sweep. The axis therefore says
+AUROC, not maxAUROC.
 
 Expected columns: dataset, method, auroc, f1_score (or f1), mcc.
 SNR is read from a ``snr`` column or from names such as ``SNR0.01-...``.
@@ -35,7 +36,7 @@ METHOD_ORDER = [
 ]
 SNR_ORDER = ["0.01", "0.1", "1"]
 METRICS = [
-    ("auroc", "maxAUROC"),
+    ("auroc", "AUROC"),
     ("f1", "maxF1"),
     ("mcc", "maxMCC"),
 ]
@@ -46,7 +47,10 @@ def _snr_label(value: str) -> str:
 
 
 def load_scores(path: Path) -> pd.DataFrame:
-    frame = pd.read_csv(path)
+    if path.suffix.lower() == ".json":
+        frame = pd.read_json(path)
+    else:
+        frame = pd.read_csv(path)
     frame.columns = [column.strip().lower() for column in frame.columns]
     if "f1" not in frame.columns and "f1_score" in frame.columns:
         frame = frame.rename(columns={"f1_score": "f1"})
@@ -71,7 +75,24 @@ def load_scores(path: Path) -> pd.DataFrame:
     return frame.dropna(subset=["snr"])
 
 
+def collapse_sparsity(frame: pd.DataFrame) -> pd.DataFrame:
+    """One row per network. AUROC belongs to the setting with the best F1."""
+    if "alpha" not in frame.columns or frame["alpha"].isna().all():
+        return frame
+    keys = [column for column in ("dataset", "method", "snr", "topology") if column in frame.columns]
+    rows = []
+    for _, part in frame.groupby(keys, dropna=False):
+        at_f1 = part.loc[part["f1"].idxmax()]
+        row = {key: at_f1[key] for key in keys}
+        row["auroc"] = float(at_f1["auroc"])
+        row["f1"] = float(at_f1["f1"])
+        row["mcc"] = float(part["mcc"].max())
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def plot_scores(frame: pd.DataFrame, output: Path) -> None:
+    frame = collapse_sparsity(frame)
     long = frame.melt(
         id_vars=["method", "snr"],
         value_vars=["auroc", "f1", "mcc"],

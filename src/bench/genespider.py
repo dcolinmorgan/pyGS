@@ -95,23 +95,100 @@ VALID_SNRS = {10, 1000, 100000}
 def _list_datasets(size: str) -> list[dict]:
     """List all datasets for a given size, return parsed metadata."""
     url = f"{DATASET_BASE}/{size}/?pagelen=100"
-    resp = requests.get(url, timeout=30).json()
     results = []
-    for v in resp.get("values", []):
-        path = v["path"]
-        m = re.search(r"ID(\d+).*N(\d+)-E(\d+)-SNR(\d+)-IDY", path)
-        if m:
-            snr = int(m.group(4))
-            if snr not in VALID_SNRS:
-                continue
-            results.append({
-                "path": path,
-                "network_id": m.group(1),
-                "n_genes": int(m.group(2)),
-                "n_experiments": int(m.group(3)),
-                "snr": snr,
-            })
+    while url:
+        resp = requests.get(url, timeout=30).json()
+        for v in resp.get("values", []):
+            path = v["path"]
+            m = re.search(r"ID(\d+).*N(\d+)-E(\d+)-SNR(\d+)-IDY", path)
+            if m:
+                snr = int(m.group(4))
+                if snr not in VALID_SNRS:
+                    continue
+                results.append({
+                    "path": path,
+                    "network_id": m.group(1),
+                    "n_genes": int(m.group(2)),
+                    "n_experiments": int(m.group(3)),
+                    "snr": snr,
+                })
+        url = resp.get("next")
     return results
+
+
+def _topology_by_id(size: str) -> dict[str, str]:
+    """Map a GeneSPIDER network id to random, scalefree, or smallworld."""
+    mapping: dict[str, str] = {}
+    for topo in TOPOLOGIES:
+        url = (
+            "https://api.bitbucket.org/2.0/repositories/sonnhammergrni/"
+            f"gs-networks/src/master/{topo}/{size}/?pagelen=100"
+        )
+        while url:
+            resp = requests.get(url, timeout=30).json()
+            for item in resp.get("values", []):
+                match = re.search(r"ID(\d+)", item["path"])
+                if match:
+                    mapping[match.group(1)] = topo
+            url = resp.get("next")
+    return mapping
+
+
+def select_datasets(
+    size: str,
+    topologies: list[str],
+    snrs: list[int],
+    n_per_topology: int,
+) -> list[tuple[dict, str]]:
+    """Real GeneSPIDER files only: expression, knockdown design, and true network.
+
+    Keeps the first ``n_per_topology`` network ids in each topology (0 keeps
+    every id) and every requested SNR of those networks.
+    """
+    topo_of = _topology_by_id(size)
+    wanted = set(snrs)
+    picked: dict[str, list[str]] = {topo: [] for topo in topologies}
+    chosen: list[tuple[dict, str]] = []
+    for ds in sorted(_list_datasets(size), key=lambda item: (item["network_id"], item["snr"])):
+        topo = topo_of.get(ds["network_id"])
+        if topo not in picked or ds["snr"] not in wanted:
+            continue
+        ids = picked[topo]
+        if ds["network_id"] not in ids:
+            if n_per_topology > 0 and len(ids) >= n_per_topology:
+                continue
+            ids.append(ds["network_id"])
+        chosen.append((ds, topo))
+    return chosen
+
+
+def select_networks(
+    size: str,
+    topologies: list[str],
+    n_per_topology: int,
+) -> list[tuple[list[dict], str]]:
+    """One group of dataset files per GeneSPIDER network.
+
+    Keeps the first ``n_per_topology`` network ids in each topology. Every
+    stored SNR of that network is included so the caller can use the file
+    when it matches and the knockdown design otherwise.
+    """
+    topo_of = _topology_by_id(size)
+    grouped: dict[str, list[dict]] = {}
+    for ds in sorted(_list_datasets(size), key=lambda item: (item["network_id"], item["snr"])):
+        grouped.setdefault(ds["network_id"], []).append(ds)
+    picked: dict[str, list[str]] = {topo: [] for topo in topologies}
+    chosen: list[tuple[list[dict], str]] = []
+    for network_id, rows in grouped.items():
+        topo = topo_of.get(network_id)
+        if topo not in picked:
+            continue
+        ids = picked[topo]
+        if n_per_topology > 0 and len(ids) >= n_per_topology:
+            continue
+        ids.append(network_id)
+        chosen.append((rows, topo))
+    return chosen
 
 
 def _find_network(network_name: str) -> str | None:
