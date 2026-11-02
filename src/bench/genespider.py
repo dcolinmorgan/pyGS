@@ -28,9 +28,12 @@ from sparselink.registry import get_method
 
 import sparselink.methods  # noqa: F401
 
-DATASET_BASE = "https://api.bitbucket.org/2.0/repositories/sonnhammergrni/gs-datasets/src/master"
-DATASET_RAW = "https://bitbucket.org/sonnhammergrni/gs-datasets/raw/master"
-NETWORK_RAW = "https://bitbucket.org/sonnhammergrni/gs-networks/raw/master"
+DATASET_COMMIT = "d2047430263f5ffe473525c74b4318f723c23b0e"
+NETWORK_COMMIT = "0b3a66e67d776eadaa5d68667ad9c8fbac12ef85"
+DATASET_BASE = f"https://api.bitbucket.org/2.0/repositories/sonnhammergrni/gs-datasets/src/{DATASET_COMMIT}"
+DATASET_RAW = f"https://bitbucket.org/sonnhammergrni/gs-datasets/raw/{DATASET_COMMIT}"
+NETWORK_BASE = f"https://api.bitbucket.org/2.0/repositories/sonnhammergrni/gs-networks/src/{NETWORK_COMMIT}"
+NETWORK_RAW = f"https://bitbucket.org/sonnhammergrni/gs-networks/raw/{NETWORK_COMMIT}"
 
 TOPOLOGIES = ["random", "scalefree", "smallworld"]
 SIZES = ["N10", "N50", "N100"]
@@ -120,10 +123,7 @@ def _topology_by_id(size: str) -> dict[str, str]:
     """Map a GeneSPIDER network id to random, scalefree, or smallworld."""
     mapping: dict[str, str] = {}
     for topo in TOPOLOGIES:
-        url = (
-            "https://api.bitbucket.org/2.0/repositories/sonnhammergrni/"
-            f"gs-networks/src/master/{topo}/{size}/?pagelen=100"
-        )
+        url = f"{NETWORK_BASE}/{topo}/{size}/?pagelen=100"
         while url:
             resp = requests.get(url, timeout=30).json()
             for item in resp.get("values", []):
