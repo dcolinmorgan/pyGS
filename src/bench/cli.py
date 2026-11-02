@@ -15,8 +15,8 @@ Usage::
         --nestboot --nest-runs 10 --boot-runs 10 --randomize \
         --snr 0.01,1,100 --topologies random,smallworld,scalefree \
         --n-nodes 50 --n-datasets 3 \
-        --plot -o benchmark/results/snr_figure.json
-    uv run pygs bench --plot -o benchmark/results/snr_figure.json
+        --plot -o benchmark/plots/snr_figure.json
+    uv run pygs bench --plot -o benchmark/plots/snr_figure.json
     pygs bench-gs --tier fast --sizes N50        # GeneSpider benchmark
     pygs nestboot data.csv -m lsco --nest-runs 100 --boot-runs 100 --zeta=-4:0:41 --output out.npy
     pygs plot out.npy --zeta 0.063 --per-gene 3 -o edges.csv
@@ -641,7 +641,7 @@ def _configure_snr_figure() -> argparse.Namespace:
     )
     output = Prompt.ask(
         f"  [{DIM}]Output file[/]",
-        default="benchmark/results/snr_figure.json",
+        default="benchmark/plots/snr_figure.json",
     )
     if _saved_snr_table(Path(output)) is not None:
         redraw = Prompt.ask(
@@ -2395,7 +2395,7 @@ def main() -> None:
             "    --snr 0.01,1,100 \\\n"
             "    --topologies random,smallworld,scalefree \\\n"
             "    --n-nodes 50 --n-datasets 3 \\\n"
-            "    --plot -o benchmark/results/snr_figure.json\n"
+            "    --plot -o benchmark/plots/snr_figure.json\n"
             "\n"
             "Writes the score table after each condition and every inferred\n"
             "network under snr_figure_runs/. --plot writes the boxplot when\n"
@@ -2404,7 +2404,7 @@ def main() -> None:
             "Redraw that figure from the saved table, including a partial\n"
             "CSV, without running inference again:\n"
             "\n"
-            "  uv run pygs bench --plot -o benchmark/results/snr_figure.json"
+            "  uv run pygs bench --plot -o benchmark/plots/snr_figure.json"
         ),
     )
     bp.add_argument("--tier", default="fast")

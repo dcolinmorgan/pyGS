@@ -140,14 +140,14 @@ def main() -> None:
     parser.add_argument(
         "csv",
         nargs="?",
-        default="benchmark/results/python_snr_all_methods_results.csv",
+        default="benchmark/plots/snr_figure.csv",
         help="Benchmark score table",
     )
     parser.add_argument(
         "-o",
         "--output",
-        default="benchmark/plots/snr_bootstrap_comparison_from_csv.png",
-        help="Output figure. Does not overwrite the chapter figure.",
+        default="benchmark/plots/snr_figure.png",
+        help="Output figure.",
     )
     args = parser.parse_args()
     plot_scores(load_scores(Path(args.csv)), Path(args.output))
