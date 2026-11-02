@@ -75,10 +75,12 @@ def nestboot_tables(
         "mean_support": np.abs(sign).round(4),
         "min_support": support["min_support"][target, regulator, index].round(4),
     })
-    edges["title"] = (
-        edges["regulator"] + " → " + edges["target"] + ": " + edges["sign"]
-        + ", support " + edges["mean_support"].map("{:.2f}".format)
-    )
+    edges["title"] = [
+        f"{reg} → {tgt}: {sgn}, support {sup:.2f}"
+        for reg, tgt, sgn, sup in zip(
+            edges["regulator"], edges["target"], edges["sign"], edges["mean_support"]
+        )
+    ]
     nodes = pd.DataFrame({
         "gene": genes,
         "out_degree": present.sum(axis=0),

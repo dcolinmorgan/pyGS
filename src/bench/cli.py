@@ -18,7 +18,7 @@ Usage::
         --plot -o benchmark/results/snr_figure.json
     uv run pygs bench --plot -o benchmark/results/snr_figure.json
     pygs bench-gs --tier fast --sizes N50        # GeneSpider benchmark
-    pygs nestboot data.csv -m lsco -i 100 -o 100
+    pygs nestboot data.csv -m lsco --nest-runs 100 --boot-runs 100 --zeta=-4:0:41 --output out.npy
     pygs plot out.npy --zeta 0.063 --per-gene 3 -o edges.csv
     pygs nestboot --runs 100x100 -m lsco -f data.csv --output out.npy
     pygs evaluate pred.npy --gold gold.npy       # evaluate against gold standard
@@ -1336,6 +1336,48 @@ def _run_nestboot_on_gs(
 # ── NestBoot FDR ──────────────────────────────────────────────────────────
 
 
+
+def _parse_zeta(text: str) -> np.ndarray:
+    """``-4:0:41`` is logspace(-4, 0, 41). A comma list is used as written."""
+    text = text.strip()
+    if ":" in text:
+        start, stop, count = text.split(":")
+        return np.logspace(float(start), float(stop), int(count))
+    return np.array([float(part) for part in text.split(",") if part.strip()])
+
+
+def _save_nestboot_zeta(out: Path, results, genes: list[str], zeta: np.ndarray, Y, P) -> None:
+    """Write the signed stack and the support archive ``pygs plot --zeta`` reads."""
+    from bio.knockdown import knockdown_z
+
+    xnet = np.asarray(results.xnet)
+    signed = np.asarray(results.sxnet)
+    support = np.asarray(results.min_ab)
+    if xnet.ndim == 2:
+        xnet = xnet[:, :, None]
+        signed = signed[:, :, None]
+        support = support[:, :, None]
+    np.save(out, xnet)
+    np.save(out.with_name(out.stem + "_signed.npy"), signed)
+    cutoff = np.atleast_1d(np.asarray(results.support, dtype=float))
+    try:
+        kz = knockdown_z(np.asarray(Y), np.asarray(P))
+    except Exception:
+        kz = np.full(len(genes), np.nan)
+    np.savez(
+        out.with_name(out.stem + "_support.npz"),
+        zetavec=np.asarray(zeta, dtype=float),
+        support_cutoff=cutoff,
+        fdr_at_cutoff=np.full(len(zeta), np.nan),
+        mean_support=support,
+        min_support=support,
+        genes=np.asarray(genes),
+        knockdown_z=kz,
+        failed_knockdowns=np.zeros(len(genes), dtype=bool),
+        fdr_reached=cutoff < 1.0 - 1e-9,
+    )
+
+
 def _cmd_nestboot(args: argparse.Namespace) -> None:
     """Run NestBoot FDR analysis on expression data using a sparselink method."""
     warnings.simplefilter("ignore")
@@ -1384,6 +1426,12 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
         f"  [{TEAL}]Runs[/]     {args.nest_runs} outer × {args.boot_runs} inner"
     )
     console.print(f"  [{TEAL}]FDR[/]      {args.fdr}")
+    zeta = _parse_zeta(args.zeta) if getattr(args, "zeta", None) else None
+    if zeta is not None:
+        console.print(
+            f"  [{TEAL}]Zeta[/]      {len(zeta)} thresholds "
+            f"from {zeta[0]:.3g} to {zeta[-1]:.3g}"
+        )
 
     method_cls = get_method(method_name)
 
@@ -1399,18 +1447,20 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
             fit_P = None if P_mat is None else P_mat.T
         result = method_cls().fit(X, fit_P)
         adj = result.adjacency_matrix
-        # LSCO (and other dense fits) need a cutoff sweep so NestBoot scores
-        # edge presence instead of every least-squares coefficient.
+        # A dense fit is scored by which links pass each cutoff. --zeta supplies
+        # those cutoffs; otherwise use a short quantile sweep.
         scores = np.abs(adj)
         np.fill_diagonal(scores, 0.0)
         nonzero = scores[scores > 0]
         if nonzero.size == 0:
             return adj
-        thresholds = np.unique(np.quantile(nonzero, np.linspace(0.5, 0.95, 8)))
+        thresholds = zeta if zeta is not None else np.unique(
+            np.quantile(nonzero, np.linspace(0.5, 0.95, 8))
+        )
         slices = []
         for thr in thresholds:
             masked = adj.copy()
-            masked[scores < thr] = 0.0
+            masked[scores <= thr] = 0.0
             slices.append(masked)
         if len(slices) == 1:
             return slices[0]
@@ -1444,13 +1494,17 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
 
     # Save adjacency
     out = Path(args.output)
-    np.save(out, results.xnet)
-    console.print(f"  [{DIM}]Adjacency saved to {out}[/]")
-
-    # Save signed network
-    signed_out = out.with_stem(out.stem + "_signed")
-    np.save(signed_out, results.sxnet)
-    console.print(f"  [{DIM}]Signed network saved to {signed_out}[/]")
+    if zeta is not None:
+        _save_nestboot_zeta(out, results, gene_names, zeta, matrix, ds._P)
+        console.print(f"  [{DIM}]Adjacency saved to {out}[/]")
+        console.print(f"  [{DIM}]Signed network saved to {out.with_name(out.stem + '_signed.npy')}[/]")
+        console.print(f"  [{DIM}]Support saved to {out.with_name(out.stem + '_support.npz')}[/]")
+    else:
+        np.save(out, results.xnet)
+        console.print(f"  [{DIM}]Adjacency saved to {out}[/]")
+        signed_out = out.with_stem(out.stem + "_signed")
+        np.save(signed_out, results.sxnet)
+        console.print(f"  [{DIM}]Signed network saved to {signed_out}[/]")
 
     # Export text summary
     txt_out = out.with_suffix(".txt")
@@ -2452,6 +2506,11 @@ def main() -> None:
     nb.add_argument("--fdr", type=float, default=0.05, help="FDR threshold")
     nb.add_argument("--seed", type=int, default=42)
     nb.add_argument("--output", default="nestboot.npy", help="Output adjacency .npy")
+    nb.add_argument(
+        "--zeta",
+        default=None,
+        help="LSCO sparsity grid. -4:0:41 is logspace from 1e-4 to 1 with 41 steps. A comma list is used as written",
+    )
 
     # evaluate
     ep = subs.add_parser(
