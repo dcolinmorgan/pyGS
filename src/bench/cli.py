@@ -1464,36 +1464,88 @@ def _parse_zeta(text: str) -> np.ndarray:
     return np.array([float(part) for part in text.split(",") if part.strip()])
 
 
-def _save_nestboot_zeta(out: Path, results, genes: list[str], zeta: np.ndarray, Y, P) -> None:
-    """Write the signed stack and the support archive ``pygs plot --zeta`` reads."""
+def _save_nestboot_zeta(
+    out: Path, results, genes: list[str], zeta: np.ndarray, Y, P, fdr: float
+) -> None:
+    """Write the signed stack, the support archive and the support table.
+
+    ``pygs plot --zeta`` reads the archive; ``nestboot_report/plot_support.py``
+    reads the archive and the table.
+    """
+    import pandas as pd
+
     from bio.knockdown import knockdown_z
 
-    xnet = np.asarray(results.xnet)
-    signed = np.asarray(results.sxnet)
-    support = np.asarray(results.min_ab)
-    if xnet.ndim == 2:
-        xnet = xnet[:, :, None]
-        signed = signed[:, :, None]
-        support = support[:, :, None]
+    def _stack(values) -> np.ndarray:
+        arr = np.asarray(values)
+        return arr[:, :, None] if arr.ndim == 2 else arr
+
+    xnet = _stack(results.xnet)
     np.save(out, xnet)
-    np.save(out.with_name(out.stem + "_signed.npy"), signed)
+    np.save(out.with_name(out.stem + "_signed.npy"), _stack(results.sxnet))
     cutoff = np.atleast_1d(np.asarray(results.support, dtype=float))
+    fdr_curve = np.asarray(results.fdr_curve, dtype=float)
+    zetas = np.asarray(zeta, dtype=float)
+    if len(zetas) != xnet.shape[2]:
+        zetas = np.full(xnet.shape[2], np.nan)
     try:
         kz = knockdown_z(np.asarray(Y), np.asarray(P))
     except Exception:
         kz = np.full(len(genes), np.nan)
-    np.savez(
+    np.savez_compressed(
         out.with_name(out.stem + "_support.npz"),
-        zetavec=np.asarray(zeta, dtype=float),
+        zetavec=zetas,
         support_cutoff=cutoff,
-        fdr_at_cutoff=np.full(len(zeta), np.nan),
-        mean_support=support,
-        min_support=support,
+        fdr_at_cutoff=np.atleast_1d(np.asarray(results.fp_rate, dtype=float)),
+        mean_support=_stack(results.mean_support),
+        min_support=_stack(results.min_ab),
+        run_histograms=results.run_histograms,
+        fdr_curve=fdr_curve,
+        fdr_reached=np.any(fdr_curve[:, :-1] <= fdr, axis=1),
         genes=np.asarray(genes),
         knockdown_z=kz,
         failed_knockdowns=np.zeros(len(genes), dtype=bool),
-        fdr_reached=cutoff < 1.0 - 1e-9,
     )
+    pd.DataFrame(_support_rows(results, zetas)).to_csv(
+        out.with_name(out.stem + "_support.tsv"), sep="\t", index=False
+    )
+
+
+def _support_rows(results, zetas: np.ndarray) -> list[dict[str, float]]:
+    """One row per sparsity and NB_FDR support bin.
+
+    Links per outer run (mean, SD) for measured and shuffled data, the overlap
+    of outer runs at the bin's lower edge, and the shuffled/measured area ratio
+    of the tail starting at the bin.
+    """
+    from methods.nestboot import support_bins
+
+    exact = np.asarray(results.run_histograms, dtype=float)
+    n_outer, n_slices, n_counts, _ = exact.shape
+    to_bin = support_bins(n_counts - 1, n_outer)
+    hist = np.zeros((n_outer, n_slices, n_outer, 2))
+    for count, b in enumerate(to_bin):
+        hist[:, :, b] += exact[:, :, count]
+    overlap = results.accumulated
+    if not isinstance(overlap, list):
+        overlap = [overlap]
+    rows = []
+    for k in range(n_slices):
+        for b in range(n_outer):
+            rows.append({
+                "slice": k,
+                "zeta": zetas[k],
+                "bin": b + 1,
+                "support_from": b / n_outer,
+                "measured_links": hist[:, k, b, 0].mean(),
+                "measured_sd": hist[:, k, b, 0].std(),
+                "shuffled_links": hist[:, k, b, 1].mean(),
+                "shuffled_sd": hist[:, k, b, 1].std(),
+                "measured_overlap": overlap[k][b, 0],
+                "shuffled_overlap": overlap[k][b, 1],
+                "tail_area_ratio": results.fdr_curve[k, b],
+            })
+    return rows
 
 
 def _cmd_nestboot(args: argparse.Namespace) -> None:
@@ -1603,6 +1655,7 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
             nest_runs=args.nest_runs,
             boot_runs=args.boot_runs,
             seed=args.seed,
+            keep_design=P is not None,
         )
 
     # Report
@@ -1613,10 +1666,11 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
     # Save adjacency
     out = Path(args.output)
     if zeta is not None:
-        _save_nestboot_zeta(out, results, gene_names, zeta, matrix, ds._P)
+        _save_nestboot_zeta(out, results, gene_names, zeta, matrix, ds._P, args.fdr)
         console.print(f"  [{DIM}]Adjacency saved to {out}[/]")
         console.print(f"  [{DIM}]Signed network saved to {out.with_name(out.stem + '_signed.npy')}[/]")
         console.print(f"  [{DIM}]Support saved to {out.with_name(out.stem + '_support.npz')}[/]")
+        console.print(f"  [{DIM}]Support table saved to {out.with_name(out.stem + '_support.tsv')}[/]")
     else:
         np.save(out, results.xnet)
         console.print(f"  [{DIM}]Adjacency saved to {out}[/]")

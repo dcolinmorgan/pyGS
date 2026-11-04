@@ -226,3 +226,60 @@ class TestNestboot:
         # It does NOT return a square adjacency matrix.
         
         assert isinstance(results.xnet, np.ndarray)
+
+
+def _genespider_nb_fdr(cm, cs, n_inner, fdr):
+    """GeneSPIDER's NB_FDR, FDRcutoff and networks for one zeta, written
+    from +Methods/@NestBoot/NestBoot.m. cm, cs: support counts per outer run,
+    shape (R, N, N). Tail area ratios use exact fractions, so ties at fdr
+    do not depend on rounding."""
+    from fractions import Fraction
+
+    R, N, _ = cm.shape
+    off = ~np.eye(N, dtype=bool)
+    edges = np.arange(R + 1) / R
+    counts = np.stack(
+        [np.histogram(c[:, off].ravel() / n_inner, bins=edges)[0] for c in (cm, cs)], 1
+    )
+    L = R
+    nlks = 0
+    for ni in range(1, L):
+        tail = [[Fraction(int(x)) for x in counts[L - ni - 1 :, i]] for i in (0, 1)]
+        area = [sum(t) - (t[0] + t[-1]) / 2 for t in tail]
+        if area[0] != 0 and area[1] / area[0] <= Fraction(fdr).limit_denominator(1000):
+            nlks += 1
+    orig_index = L - nlks
+    cutoff = orig_index / R  # orig_index/100 in GeneSPIDER, run with R = 100
+    xnet = np.all(cm / n_inner >= cutoff, axis=0) & off
+    return orig_index, cutoff, xnet
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_nested_fdr_matches_genespider(seed):
+    rng = np.random.default_rng(seed)
+    R, Q, N = int(rng.integers(2, 12)), int(rng.integers(2, 25)), int(rng.integers(3, 10))
+    if seed % 2:
+        Q = R
+    pm = rng.beta(rng.uniform(0.3, 3), rng.uniform(0.3, 3), size=(N, N))
+    ps = rng.beta(0.5, rng.uniform(1, 8), size=(N, N))
+    cm = rng.binomial(Q, np.broadcast_to(pm, (R, N, N))).astype(np.int64)
+    cs = rng.binomial(Q, np.broadcast_to(ps, (R, N, N))).astype(np.int64)
+    d = np.arange(N)
+    cm[:, d, d] = 0
+    cs[:, d, d] = 0
+    off = ~np.eye(N, dtype=bool)
+    fdr = float(rng.choice([0.05, 0.1, 0.2, 0.5]))
+
+    run_hist = np.zeros((R, 1, Q + 1, 2), dtype=np.int64)
+    for r in range(R):
+        run_hist[r, 0, :, 0] = np.bincount(cm[r][off], minlength=Q + 1)
+        run_hist[r, 0, :, 1] = np.bincount(cs[r][off], minlength=Q + 1)
+    lo = np.stack([cm.min(0), cs.min(0)])[..., None]
+    hi = np.stack([cm.max(0), cs.max(0)])[..., None]
+    total = cm.sum(0)[..., None]
+    res = Nestboot()._nested_fdr(run_hist, lo, hi, total, total, R, Q, fdr)
+
+    orig_index, cutoff, xnet = _genespider_nb_fdr(cm, cs, Q, fdr)
+    assert res.orig_index == orig_index
+    assert np.isclose(res.support, cutoff)
+    assert np.array_equal(res.xnet != 0, xnet)

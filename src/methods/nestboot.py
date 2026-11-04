@@ -23,6 +23,16 @@ except ImportError:
         epsilon: float = 1e-10
 
 
+def support_bins(n_inner: int, n_outer: int) -> np.ndarray:
+    """NB_FDR bin (0-based) of each support count 0..n_inner.
+
+    GeneSPIDER bins support k/n_inner with edges (0:n_outer)/n_outer. The
+    last bin is closed, so support 1 shares it with the bin below.
+    """
+    k = np.arange(n_inner + 1)
+    return np.minimum(k * n_outer // n_inner, n_outer - 1)
+
+
 @dataclass
 class NetworkData:
     """Data class to hold network analysis data.
@@ -54,6 +64,11 @@ class NetworkResults:
         binned_freq: Binned frequencies (array or list of arrays)
         fp_rate: False positive rate at crossing (float or list/array)
         support: Support at crossing (float or list/array)
+        mean_support: Support averaged over outer runs (run_nestboot only)
+        run_histograms: Links per support bin in each outer run, shape
+            (outer runs, slices, inner runs + 1, 2) for measured and shuffled
+        fdr_curve: Shuffled/measured area ratio for the tail starting at each
+            NB_FDR bin, shape (slices, outer runs); the top bin has none
     """
 
     xnet: np.ndarray
@@ -67,6 +82,9 @@ class NetworkResults:
     support: float | np.ndarray | list[float]
     gene_i: list[str] | None = None
     gene_j: list[str] | None = None
+    mean_support: np.ndarray | None = None
+    run_histograms: np.ndarray | None = None
+    fdr_curve: np.ndarray | None = None
 
 
 class Nestboot:
@@ -296,29 +314,31 @@ class Nestboot:
 
             # --- Dynamic FDR Threshold Calculation ---
             if sub_merged.empty:
-                best_t = 0.8  # Fallback
+                best_t = np.nan  # No links at this sparsity
             else:
-                # Find the LOWEST support threshold t where FDR(t) <= target_fdr
-                # for ALL thresholds >= t (step-down procedure).
-                # FDR(t) = #{shuffled links with Afrac >= t} / #{normal links with Afrac >= t}
-                # Scan from HIGH to LOW: find most permissive t that controls FDR.
-                t_vals = np.linspace(0.05, 1.0, 96)
+                # Equation 1 of Morgan et al. 2019: the cutoff is the smallest
+                # support t at which
+                #   #{shuffled links with Afrac >= t} / #{normal links with Afrac >= t}
+                # is at most target_fdr. Scanning down from 1.0 instead stops at
+                # the highest support any normal link reaches, where no shuffled
+                # link exists, and keeps only a handful of links.
+                t_vals = np.linspace(0.01, 1.0, 100)
 
                 n_norm_arr = sub_merged["Afrac_norm"].values
                 n_shuf_arr = sub_merged["Afrac_shuf"].values
 
-                best_t = 1.0  # Default: most conservative
+                # No t controls FDR: empty network. A dense sparsity has every
+                # link at support 1.0 in measured and shuffled runs alike.
+                best_t = np.nan
 
-                for t in reversed(t_vals):
+                for t in t_vals:
                     n_norm = (n_norm_arr >= t).sum()
                     if n_norm == 0:
-                        continue
+                        break
                     n_shuf = (n_shuf_arr >= t).sum()
-                    fdr_est = n_shuf / n_norm
-
-                    if fdr_est <= target_fdr:
+                    if n_shuf / n_norm <= target_fdr:
                         best_t = t
-                        break  # Most permissive threshold that controls FDR
+                        break
 
             support_threshold = best_t
 
@@ -411,7 +431,9 @@ class Nestboot:
             binned_freq_list.append(binned_freq)
             fp_rate_list.append(0.0)  # Placeholder/Depr
             support_list.append(support_threshold)
-            orig_index_list.append(int(support_threshold * 100))
+            orig_index_list.append(
+                -1 if np.isnan(support_threshold) else int(round(support_threshold * 100))
+            )
 
         # Stack results
         if n_params == 1:
@@ -719,10 +741,23 @@ class Nestboot:
             f.write(f"ssum shape: {results.ssum.shape}\n")
             f.write(f"min_ab shape: {results.min_ab.shape}\n")
             f.write(f"sxnet shape: {results.sxnet.shape}\n")
+            # One array per sparsity slice when the inference returns several.
+            acc = results.accumulated
+            acc_blocks = acc if isinstance(acc, list) else [acc]
+            freq = results.binned_freq
+            freq_blocks = freq if isinstance(freq, list) else [freq]
             f.write("Accumulated (first 5 rows):\n")
-            _write_array(f, results.accumulated[:5] if results.accumulated is not None else [])
+            for k, block in enumerate(acc_blocks):
+                if len(acc_blocks) > 1:
+                    f.write(f"[slice {k}]\n")
+                _write_array(f, [] if block is None else np.asarray(block)[:5])
             f.write("\nBinned frequencies:\n")
-            _write_array(f, results.binned_freq)
+            for k, block in enumerate(freq_blocks):
+                if len(freq_blocks) > 1:
+                    f.write(f"[slice {k}] ")
+                # One row each for measured and shuffled.
+                arr = np.asarray(block)
+                _write_array(f, arr.T if arr.ndim == 2 else arr)
 
     def plot_analysis_results(
         self, merged: pd.DataFrame, plot_file: Path, bins: int = 10
@@ -869,46 +904,6 @@ class Nestboot:
         self.logger.info(f"Computed network density for {len(result_df)} runs")
         return result_df
 
-    def _frames_from_counts(
-        self,
-        presence: np.ndarray,
-        positive: np.ndarray,
-        weights: np.ndarray,
-        names: list[str],
-        total_runs: int,
-        suffix: str,
-    ) -> pd.DataFrame:
-        """Turn per-edge counts into the aggregated NestBoot table."""
-        frames = []
-        for p in range(presence.shape[2]):
-            rows, cols = np.nonzero(presence[:, :, p])
-            if len(rows) == 0:
-                continue
-            pres = presence[rows, cols, p].astype(float)
-            frames.append(
-                pd.DataFrame(
-                    {
-                        "param_idx": p,
-                        "gene_i": [names[i] for i in rows],
-                        "gene_j": [names[j] for j in cols],
-                        f"Afrac_{suffix}": pres / total_runs,
-                        f"Asign_frac_{suffix}": positive[rows, cols, p] / pres,
-                        f"Aavg_{suffix}": weights[rows, cols, p] / total_runs,
-                    }
-                )
-            )
-        columns = [
-            "param_idx",
-            "gene_i",
-            "gene_j",
-            f"Afrac_{suffix}",
-            f"Asign_frac_{suffix}",
-            f"Aavg_{suffix}",
-        ]
-        if not frames:
-            return pd.DataFrame(columns=columns)
-        return pd.concat(frames, ignore_index=True)
-
     def run_nestboot(
         self,
         dataset: Any,
@@ -918,8 +913,28 @@ class Nestboot:
         seed: int = 42,
         method_kwargs: dict[str, Any] | None = None,
         method_params: dict[str, Any] | None = None,
+        keep_design: bool = False,
     ) -> NetworkResults:
-        """Run NestBoot analysis with bootstrapping and network inference.
+        """Run NestBoot (Morgan et al. 2019) as in GeneSPIDER's Methods.NestBoot.
+
+        Each of the nest_runs outer runs fits boot_runs bootstraps of the
+        measured data and boot_runs bootstraps of one shuffled copy, in which
+        each sample's values are permuted across genes. A link's support in an
+        outer run is the fraction of that run's boot_runs fits containing it.
+
+        Support from all outer runs is pooled into nest_runs bins with edges
+        (0:nest_runs)/nest_runs, as in GeneSPIDER's NB_FDR. Each tail of bins
+        whose shuffled trapezoid area is at most fdr times the measured area
+        moves the cutoff down one bin (FDRcutoff). The binary network keeps
+        links whose support clears the cutoff in every outer run.
+        mean_support is the support averaged over outer runs, for a network
+        without that intersection.
+
+        A plain bootstrap is redrawn until P keeps full rank, as in GeneSPIDER.
+        With keep_design, each bootstrap resamples samples within groups that
+        share the same perturbation (column of P), so every perturbation stays
+        in every draw. The full-rank redraw never succeeds on a design with 2
+        replicates per knockdown.
 
         Args:
             dataset: Data object containing the dataset
@@ -931,6 +946,7 @@ class Nestboot:
             seed: Random seed
             method_kwargs: Additional arguments for callable inference_method
             method_params: Parameters to pass to inference method class (e.g., {'alpha_range': zetavec})
+            keep_design: Bootstrap within replicate groups of P
 
         Returns:
             NetworkResults object
@@ -955,22 +971,62 @@ class Nestboot:
         n_genes = ds_obj.N
         n_samples = ds_obj.M
 
-        gene_names_list = (
-            ds_obj.gene_names
-            if hasattr(ds_obj, "gene_names") and ds_obj.gene_names
-            else [f"Gene_{i:02d}" for i in range(n_genes)]
-        )
-
         # Keep clean copies of the original data for bootstrapping
         original_Y = ds_obj.Y.copy()
         original_P = ds_obj.P.copy()
 
-        total_runs = nest_runs * boot_runs
-        boot_indices = [
-            np.random.choice(n_samples, size=n_samples, replace=True)
-            for _ in range(total_runs)
-        ]
-        shuffle_indices = [np.random.permutation(n_samples) for _ in range(total_runs)]
+        n_outer, n_inner = nest_runs, boot_runs
+        if keep_design:
+            _, design_group = np.unique(
+                np.asarray(original_P).T, axis=0, return_inverse=True
+            )
+            groups = [
+                np.flatnonzero(design_group.ravel() == g)
+                for g in range(int(design_group.max()) + 1)
+            ]
+
+            def _draw() -> np.ndarray:
+                return np.concatenate(
+                    [np.random.choice(g, size=len(g), replace=True) for g in groups]
+                )
+
+        else:
+            full_rank = min(original_P.shape)
+            check_rank = bool(np.linalg.matrix_rank(original_P) >= full_rank)
+            rank_failures = 0
+
+            def _draw() -> np.ndarray:
+                # GeneSPIDER redraws without limit; stop checking once 100
+                # draws in a row lose rank, since P is then rarely recoverable.
+                nonlocal check_rank, rank_failures
+                idx = np.random.choice(n_samples, size=n_samples, replace=True)
+                tries = 1
+                while (
+                    check_rank
+                    and np.linalg.matrix_rank(original_P[:, idx]) < full_rank
+                ):
+                    if tries == 100:
+                        rank_failures += 1
+                        check_rank = False
+                        break
+                    idx = np.random.choice(n_samples, size=n_samples, replace=True)
+                    tries += 1
+                return idx
+
+        # Draw order per outer run: measured bootstraps, shuffle, shuffled bootstraps.
+        boot_indices = []
+        shuffled_Y = []
+        shuffled_indices = []
+        for _ in range(n_outer):
+            boot_indices.append([_draw() for _ in range(n_inner)])
+            gene_order = np.argsort(np.random.rand(n_genes, n_samples), axis=0)
+            shuffled_Y.append(np.take_along_axis(original_Y, gene_order, axis=0))
+            shuffled_indices.append([_draw() for _ in range(n_inner)])
+        if not keep_design and rank_failures:
+            self.logger.warning(
+                "Bootstraps of P lost full rank 100 times in a row; "
+                "using plain bootstrap draws from then on"
+            )
 
         from datastruct.Dataset import Dataset
         from threadpoolctl import threadpool_limits
@@ -995,76 +1051,218 @@ class Nestboot:
             obj._dataset_name = getattr(ds_obj, "_dataset_name", "Bootstrap")
             return Data(obj)
 
-        def _one(i: int) -> tuple[np.ndarray, np.ndarray]:
+        def _fit(task: tuple[int, int, int]) -> tuple[np.ndarray, np.ndarray]:
+            r, side, q = task
+            Y = original_Y if side == 0 else shuffled_Y[r]
+            idx = (boot_indices if side == 0 else shuffled_indices)[r][q]
             with threadpool_limits(limits=1):
-                boot = _wrap(
-                    original_Y[:, boot_indices[i]].copy(),
-                    original_P[:, boot_indices[i]].copy(),
-                )
-                shuffled = _wrap(original_Y[:, shuffle_indices[i]].copy(), original_P)
-                return _call(boot), _call(shuffled)
-
-        def _add(
-            mat: np.ndarray,
-            presence: np.ndarray | None,
-            positive: np.ndarray | None,
-            weight: np.ndarray | None,
-        ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-            arr = np.asarray(mat, dtype=float)
+                arr = _call(_wrap(Y[:, idx].copy(), original_P[:, idx].copy()))
             if arr.ndim == 2:
                 arr = arr[:, :, None]
-            if presence is None:
-                presence = np.zeros(arr.shape, dtype=np.int32)
-                positive = np.zeros(arr.shape, dtype=np.int32)
-                weight = np.zeros(arr.shape, dtype=float)
-            elif arr.shape != presence.shape:
-                raise ValueError(f"Inference shape {arr.shape} != {presence.shape}")
             present = np.abs(arr) > 1e-6
             diag = np.arange(arr.shape[0])
             present[diag, diag, :] = False
-            presence += present
-            positive += (arr > 0) & present
-            weight += np.where(present, arr, 0.0)
-            return presence, positive, weight
+            return present, arr
 
-        n_workers = min(os.cpu_count() or 1, max(total_runs, 1))
-        presence_n = positive_n = weight_n = None
-        presence_s = positive_s = weight_s = None
-        done = 0
+        # side 0 is measured, side 1 shuffled.
+        tasks = [
+            (r, side, q)
+            for r in range(n_outer)
+            for side in (0, 1)
+            for q in range(n_inner)
+        ]
+        total_fits = len(tasks)
+
+        # The first fit runs alone to size the accumulators and fail fast.
+        first = _fit(tasks[0])
+        shape = first[0].shape
+        n_slices = shape[2]
+        offdiag = ~np.eye(n_genes, dtype=bool)
+        count_dtype = np.uint16 if n_inner < 2**16 else np.uint32
+        run_hist = np.zeros((n_outer, n_slices, n_inner + 1, 2), dtype=np.int64)
+        lo = np.full((2,) + shape, n_inner, dtype=count_dtype)
+        hi = np.zeros((2,) + shape, dtype=count_dtype)
+        total = np.zeros(shape, dtype=np.int64)
+        positive = np.zeros(shape, dtype=np.int64)
+        in_flight: dict[int, np.ndarray] = {}
+        fits_done = np.zeros(n_outer, dtype=int)
+
+        def _finish(r: int) -> None:
+            counts = in_flight.pop(r)
+            for side in (0, 1):
+                for p in range(n_slices):
+                    run_hist[r, p, :, side] = np.bincount(
+                        counts[side][:, :, p][offdiag], minlength=n_inner + 1
+                    )
+            np.minimum(lo, counts, out=lo)
+            np.maximum(hi, counts, out=hi)
+            np.add(total, counts[0], out=total)
+
+        def _record(
+            task: tuple[int, int, int], result: tuple[np.ndarray, np.ndarray] | None
+        ) -> None:
+            r, side, _ = task
+            counts = in_flight.setdefault(r, np.zeros((2,) + shape, dtype=count_dtype))
+            if result is not None:
+                present, arr = result
+                if present.shape != shape:
+                    raise ValueError(f"Inference shape {present.shape} != {shape}")
+                counts[side] += present
+                if side == 0:
+                    np.add(positive, (arr > 0) & present, out=positive)
+            fits_done[r] += 1
+            if fits_done[r] == 2 * n_inner:
+                _finish(r)
+
+        _record(tasks[0], first)
+        del first
+        done = 1
         failures = 0
-        step = max(1, total_runs // 20)
+        step = max(1, total_fits // 20)
+        print(f"  NestBoot {done}/{total_fits}", flush=True)
+        n_workers = min(os.cpu_count() or 1, total_fits)
         with ThreadPoolExecutor(max_workers=n_workers) as pool:
-            futures = [pool.submit(_one, i) for i in range(total_runs)]
-            for fut in as_completed(futures):
+            futures = {pool.submit(_fit, t): t for t in tasks[1:]}
+            for fut in as_completed(list(futures)):
+                # Drop the finished future so its matrices can be freed.
+                task = futures.pop(fut)
                 try:
-                    boot_mat, shuf_mat = fut.result()
+                    result = fut.result()
                 except Exception as exc:
                     failures += 1
-                    self.logger.error(f"Bootstrap iteration failed: {exc}")
-                    continue
-                presence_n, positive_n, weight_n = _add(
-                    boot_mat, presence_n, positive_n, weight_n
-                )
-                presence_s, positive_s, weight_s = _add(
-                    shuf_mat, presence_s, positive_s, weight_s
-                )
+                    self.logger.error(f"Bootstrap fit {task} failed: {exc}")
+                    result = None
+                _record(task, result)
                 done += 1
-                if done == 1 or done % step == 0 or done == total_runs:
-                    print(f"  NestBoot {done}/{total_runs}", flush=True)
+                if done % step == 0 or done == total_fits:
+                    print(f"  NestBoot {done}/{total_fits}", flush=True)
 
-        if presence_n is None or presence_s is None:
-            raise ValueError("No bootstrap data generated")
         if failures:
-            self.logger.warning(f"{failures} bootstrap iterations failed")
-
-        normal_df = self._frames_from_counts(
-            presence_n, positive_n, weight_n, gene_names_list, total_runs, "norm"
-        )
-        shuffled_df = self._frames_from_counts(
-            presence_s, positive_s, weight_s, gene_names_list, total_runs, "shuf"
-        )
-        merged = pd.merge(
-            normal_df, shuffled_df, on=["param_idx", "gene_i", "gene_j"], how="outer"
-        ).fillna(0)
+            self.logger.warning(
+                f"{failures} of {total_fits} bootstrap fits failed "
+                "and count as empty networks"
+            )
         fdr = self.config.fdr_threshold if hasattr(self, "config") else 0.05
-        return self._compute_network_metrics(merged, fdr, gene_names_list)
+        return self._nested_fdr(run_hist, lo, hi, total, positive, n_outer, n_inner, fdr)
+
+    def _nested_fdr(
+        self,
+        run_hist: np.ndarray,
+        lo: np.ndarray,
+        hi: np.ndarray,
+        total: np.ndarray,
+        positive: np.ndarray,
+        n_outer: int,
+        n_inner: int,
+        fdr: float,
+    ) -> NetworkResults:
+        """Cutoff and networks from per-outer-run support, as GeneSPIDER's NB_FDR.
+
+        Args:
+            run_hist: Links per support count in each outer run, shape
+                (outer, slices, inner + 1, 2) for measured and shuffled
+            lo: Lowest support count over outer runs, shape (2, N, N, slices)
+            hi: Highest support count over outer runs, same shape as lo
+            total: Measured presence count over all fits, shape (N, N, slices)
+            positive: Measured fits with a positive coefficient, same shape
+            n_outer: Number of outer runs
+            n_inner: Number of inner bootstraps per outer run
+            fdr: False discovery rate threshold
+
+        Returns:
+            NetworkResults with xnet the intersection over outer runs at the cutoff
+        """
+        if n_outer < 2:
+            raise ValueError("NestBoot needs at least 2 outer runs")
+        n_genes, _, n_slices = total.shape
+        n_bins = n_outer
+        to_bin = support_bins(n_inner, n_outer)
+        offdiag = ~np.eye(n_genes, dtype=bool)
+        mean_support = total / (n_outer * n_inner)
+        sign = np.where(2 * positive >= total, 1.0, -1.0)
+        sign[total == 0] = 0.0
+        xnet = np.zeros(total.shape)
+        fdr_curve = np.full((n_slices, n_bins), np.nan)
+        accumulated: list[np.ndarray] = []
+        binned_freq: list[np.ndarray] = []
+        fp_rate: list[float] = []
+        support: list[float] = []
+        orig_index: list[int] = []
+
+        for p in range(n_slices):
+            counts = np.zeros((n_bins, 2))
+            np.add.at(counts, to_bin, run_hist[:, p].sum(axis=0))
+            freq = counts / counts.sum(axis=0, keepdims=True)
+            # FDRcutoff: trapezoid area under each tail from bin s to the top
+            # bin, s = n_bins - 2 down to 0. Both columns total outer runs x
+            # links, so areas of counts give the ratio of areas of freq.
+            tail = np.cumsum(counts[::-1], axis=0)[::-1]
+            area = tail - 0.5 * (counts + counts[-1])
+            with np.errstate(divide="ignore", invalid="ignore"):
+                ratio = area[:, 1] / area[:, 0]
+            fdr_curve[p, :-1] = ratio[:-1]
+            # GeneSPIDER counts the passing tails rather than scanning for the
+            # first failure; the two agree while the ratio falls with support.
+            # With no passing tail, bin_cutoff is the top bin and cutoff 1.
+            n_pass = int(np.sum(ratio[:-1] <= fdr))
+            cut_bin = n_bins - n_pass  # 1-based, GeneSPIDER's bin_cutoff
+            # GeneSPIDER divides by 100, written for 100 outer runs; this is the
+            # upper edge of bin cut_bin, one bin above the start of the tail.
+            cutoff = cut_bin / n_outer
+            xnet[:, :, p] = (
+                lo[0][:, :, p].astype(np.int64) * n_outer >= cut_bin * n_inner
+            ) & offdiag
+            kept = counts[cut_bin - 1 :].sum(axis=0)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                fp = np.nan_to_num(kept[1] / kept[0], nan=0.0, posinf=np.inf)
+
+            # Overlap of outer runs at support k/n_outer: links at or above it
+            # in every run over links at or above it in any run.
+            overlap = np.zeros((n_outer + 1, 2))
+            for side in (0, 1):
+                k_lo = lo[side][:, :, p][offdiag].astype(np.int64) * n_outer // n_inner
+                k_hi = hi[side][:, :, p][offdiag].astype(np.int64) * n_outer // n_inner
+                inter = np.cumsum(np.bincount(k_lo, minlength=n_outer + 1)[::-1])[::-1]
+                union = np.cumsum(np.bincount(k_hi, minlength=n_outer + 1)[::-1])[::-1]
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    overlap[1:, side] = np.where(
+                        union[1:] > 0, inter[1:] / union[1:], 0.0
+                    )
+
+            accumulated.append(overlap)
+            binned_freq.append(freq)
+            fp_rate.append(float(fp))
+            support.append(float(cutoff))
+            orig_index.append(cut_bin)
+
+        min_support = lo[0] / n_inner
+        sxnet = sign * mean_support
+        if n_slices == 1:
+            return NetworkResults(
+                xnet=xnet[:, :, 0],
+                ssum=sign[:, :, 0],
+                min_ab=min_support[:, :, 0],
+                sxnet=sxnet[:, :, 0],
+                orig_index=orig_index[0],
+                accumulated=accumulated[0],
+                binned_freq=binned_freq[0],
+                fp_rate=fp_rate[0],
+                support=support[0],
+                mean_support=mean_support[:, :, 0],
+                run_histograms=run_hist,
+                fdr_curve=fdr_curve,
+            )
+        return NetworkResults(
+            xnet=xnet,
+            ssum=sign,
+            min_ab=min_support,
+            sxnet=sxnet,
+            orig_index=orig_index,
+            accumulated=accumulated,
+            binned_freq=binned_freq,
+            fp_rate=fp_rate,
+            support=support,
+            mean_support=mean_support,
+            run_histograms=run_hist,
+            fdr_curve=fdr_curve,
+        )
