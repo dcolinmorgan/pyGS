@@ -73,7 +73,7 @@ def plotter(edges: pd.DataFrame, nodes: pd.DataFrame):
     return (
         graphistry.edges(edges, "regulator", "target")
         .nodes(nodes, "gene")
-        .bind(point_title="gene", edge_title="title", edge_weight="mean_support")
+        .bind(point_title="gene", edge_title="title")
         .encode_edge_color("sign", categorical_mapping={"activation": ACTIVATION, "repression": REPRESSION})
         .encode_point_color("knockdown", categorical_mapping={"ok": "#1f5aa6", "failed (removed)": "#f39c12"})
         .encode_point_size("out_degree")

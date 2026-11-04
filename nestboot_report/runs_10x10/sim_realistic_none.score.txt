@@ -1,0 +1,11 @@
+         label  slice  zeta  cutoff  estimated_fdr  links  true_fdr  recall  sign_agreement  links_into_failed  mean_links  mean_true_fdr  mean_recall
+realistic_none     31 0.126     0.9          0.048    675     0.908   0.089           0.984                 40        1730          0.947        0.132
+realistic_none     32 0.158     0.7          0.042   1807     0.949   0.132           0.946                124        4539          0.968        0.210
+realistic_none     33 0.200     0.3          0.055   6797     0.972   0.274           0.874                555       14452          0.979        0.437
+realistic_none     34 0.251     0.2          0.043   5581     0.971   0.233           0.877                486       12297          0.977        0.402
+realistic_none     35 0.316     0.2          0.014   2369     0.960   0.135           0.926                219        5743          0.972        0.227
+realistic_none     36 0.398     0.2          0.006    776     0.936   0.072           0.940                 69        2078          0.963        0.109
+realistic_none     37 0.501     0.2          0.002    179     0.922   0.020           1.000                 14         573          0.942        0.047
+realistic_none     38 0.631     0.2          0.000     28     0.893   0.004           1.000                  1          81          0.901        0.011
+realistic_none     39 0.794     0.4          0.000      0       NaN   0.000             NaN                  0           0            NaN        0.000
+realistic_none     40 1.000     0.7          0.000      0       NaN   0.000             NaN                  0           0            NaN        0.000

@@ -1,11 +1,18 @@
-"""Benchmark inference against GeneSPIDER true networks.
+"""Benchmark inference against known true networks across SNR_L levels.
 
-``pygs bench --snr`` loads the network JSON as the true GRN and the dataset
-JSON as the expression and knockdown design. Only stored GeneSPIDER files
+``pygs bench-gs --snr`` loads the GeneSPIDER network JSON as the true GRN and
+the dataset JSON as the expression and knockdown design. Only stored files
 are used. The N50 collection has three levels, SNR_L 0.01, 1, and 100,
 stored under filenames SNR10, SNR1000, and SNR100000. A requested SNR with
-no matching file stops the run. Every inferred network is written next to
-the score table.
+no matching file stops the run before any inference.
+
+``pygs bench --snr`` generates the data instead. Each network has the
+requested size, topology and edge density, with a negative diagonal shifted
+until A + A.T is negative definite and cond(A) <= N/2. The design repeats
+single-gene knockdowns, and Y = -pinv(A) @ P + E with E scaled so SNR_L is
+each requested value. Any positive SNR works.
+
+Every inferred network is written next to the score table.
 """
 
 from __future__ import annotations
@@ -14,6 +21,7 @@ import argparse
 import json
 import math
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -55,6 +63,40 @@ def simulate_expression(
     variance = noise_var_for_snr(A, P, snr)
     noise = rng.normal(0.0, math.sqrt(variance), size=P.shape)
     return signal + noise
+
+
+TOPOLOGIES = ("random", "scalefree", "smallworld")
+
+
+def stable_network(n_nodes: int, topology: str, sparsity: float, seed: int) -> np.ndarray:
+    """Signed links on a negative diagonal, stable and with cond(A) <= N/2.
+
+    The diagonal shift makes the symmetric part negative definite, so every
+    eigenvalue of A has a negative real part. N/2 is GeneSPIDER's low
+    interampatteness bound.
+    """
+    from sparselink.bench.synthetic import generate_network
+
+    if topology not in TOPOLOGIES:
+        raise ValueError(f"Unknown topology {topology!r}; use one of {', '.join(TOPOLOGIES)}")
+    structure = generate_network(n_nodes, topology=topology, sparsity=sparsity, seed=seed) != 0
+    np.fill_diagonal(structure, False)
+    rng = np.random.default_rng(seed)
+    weights = np.where(structure, rng.standard_normal(structure.shape), 0.0)
+    top = float(np.max(np.linalg.eigvalsh((weights + weights.T) / 2)))
+    margin = 0.1
+    while True:
+        A = weights - (top + margin) * np.eye(n_nodes)
+        if np.linalg.cond(A) <= n_nodes / 2:
+            return A
+        margin *= 2
+
+
+def knockdown_design(n_nodes: int, n_samples: int) -> np.ndarray:
+    """Single-gene knockdowns, gene j in every experiment j mod N."""
+    P = np.zeros((n_nodes, n_samples))
+    P[np.arange(n_samples) % n_nodes, np.arange(n_samples)] = 1.0
+    return P
 
 
 def match_snr(requested: float, files: list[dict]) -> dict | None:
@@ -197,6 +239,61 @@ def infer_stack(
     return stack, np.atleast_1d(np.asarray(used, dtype=float))
 
 
+def nestboot_slices(stack: np.ndarray) -> np.ndarray:
+    """Sparse slices for NestBoot from methods whose weights are dense.
+
+    NestBoot counts how often a link is nonzero, so dense weights would give
+    every link full support. A sweep keeps the upper half of the nonzero
+    weights in each slice; a single network is cut at the 10th to 90th
+    percentile instead. ``pygs bench-gs --nestboot`` uses the same rule.
+    """
+    slices = []
+    if stack.shape[2] == 1:
+        weights = stack[:, :, 0]
+        scores = np.abs(weights)
+        np.fill_diagonal(scores, 0.0)
+        nonzero = scores[scores > 0]
+        if len(nonzero) == 0:
+            return stack
+        for cut in np.linspace(np.percentile(nonzero, 10), np.percentile(nonzero, 90), 10):
+            slices.append(np.where(scores < cut, 0.0, weights))
+        return np.stack(slices, axis=2)
+    for index in range(stack.shape[2]):
+        weights = stack[:, :, index].copy()
+        scores = np.abs(weights)
+        np.fill_diagonal(scores, 0.0)
+        nonzero = scores[scores > 0]
+        if len(nonzero) > 0:
+            weights[scores < np.percentile(nonzero, 50)] = 0.0
+        slices.append(weights)
+    return np.stack(slices, axis=2)
+
+
+def comparison_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One row per (dataset, method), in the form the TUI comparison table reads.
+
+    AUROC and F1 come from the sparsity with the best F1 and MCC is the best
+    over sparsities, as in the boxplot.
+    """
+    if not rows:
+        return []
+    frame = pd.DataFrame(rows)
+    summary = []
+    for (dataset, method), part in frame.groupby(["dataset", "method"], sort=False):
+        at_f1 = part.loc[part["f1_score"].idxmax()]
+        summary.append({
+            "method": str(method).replace("nestboot ", "nestboot:", 1),
+            "dataset_name": dataset,
+            "topology": at_f1["topology"],
+            "snr": float(at_f1["snr"]),
+            "auroc": float(at_f1["auroc"]),
+            "f1": float(at_f1["f1_score"]),
+            "mcc": float(part["mcc"].max()),
+            "error": None,
+        })
+    return summary
+
+
 def nestboot_stack(
     method_name: str,
     Y: np.ndarray,
@@ -224,7 +321,9 @@ def nestboot_stack(
         matrix = incoming.data.Y  # type: ignore[union-attr]
         design = incoming.data.P  # type: ignore[union-attr]
         stack, _ = infer_stack(method_name, matrix, design, int(getattr(args, "seed", 42)))
-        return stack
+        if method_name in {"lasso", "lsco"}:
+            return stack
+        return nestboot_slices(stack)
 
     config = AnalysisConfig(
         total_runs=args.nest_runs * args.boot_runs,
@@ -316,53 +415,23 @@ def _checkpoint(rows: list[dict], csv_path: Path, json_path: Path) -> None:
     json_path.write_text(json.dumps(rows, indent=2))
 
 
-def run_snr_benchmark(args: argparse.Namespace) -> None:
-    from bench.cli import DIM, GREEN, ROSE, TEAL, _write_snr_figure, console
+def _stored_conditions(
+    args: argparse.Namespace, snrs: list[float], topologies: list[str]
+) -> tuple[list[dict[str, Any]], str]:
+    """Every (network, SNR) pair from stored files. A missing SNR stops the run."""
+    from bench.cli import ROSE, console
     from bench.genespider import select_networks
 
-    methods = _methods(args)
-    if not methods:
-        console.print(f"  [{ROSE}]No valid methods selected.[/]")
-        return
-    if not getattr(args, "snr", None):
-        console.print(f"  [{ROSE}]--snr is required.[/]")
-        return
-
-    snrs = parse_snrs(args.snr)
-    topologies = [name.strip() for name in args.topologies.split(",") if name.strip()]
     size = _size(args)
-    arms = _arms(methods, args)
-    nest_methods = [name for name in methods if name in {"lasso", "lsco"}] if args.nestboot else []
+    if "," in size:
+        console.print(f"  [{ROSE}]--snr takes one size; got {size}.[/]")
+        raise SystemExit(2)
     chosen = select_networks(size, topologies, int(args.n_datasets))
     if not chosen:
         console.print(f"  [{ROSE}]No GeneSPIDER networks for {size} and {topologies}.[/]")
-        return
+        raise SystemExit(1)
 
-    run_dir = Path(args.output).with_name(Path(args.output).stem + "_runs")
-    csv_path = Path(args.output).with_suffix(".csv")
-    json_path = Path(args.output)
-    conditions = len(chosen) * len(snrs)
-    per_condition = len(arms) + len(nest_methods)
-    console.print(f"  [{TEAL}]Methods[/]     {', '.join(method for _, method, shuffled in arms if not shuffled)}")
-    if getattr(args, "randomize", False):
-        console.print(f"  [{TEAL}]Random[/]      gene-wise shuffle of each method")
-    if nest_methods:
-        console.print(
-            f"  [{TEAL}]NestBoot[/]    {', '.join(nest_methods)} ({args.nest_runs}×{args.boot_runs})"
-        )
-    console.print(
-        f"  [{TEAL}]Networks[/]    {len(chosen)} GeneSPIDER {size} networks "
-        f"({args.n_datasets} per topology)"
-    )
-    console.print(f"  [{TEAL}]SNR[/]         {', '.join(_snr_label(snr) for snr in snrs)}")
-    console.print(
-        f"  [{TEAL}]Saved runs[/]  {run_dir}  ({conditions} conditions × {per_condition} arms)"
-    )
-    console.print()
-
-    rows: list[dict] = []
-    seed = int(getattr(args, "seed", 42))
-    done = 0
+    conditions = []
     for network_index, (metas, topology) in enumerate(chosen):
         files = [_read_dataset(meta) for meta in metas]
         network_name = files[0]["network"]
@@ -378,77 +447,212 @@ def run_snr_benchmark(args: argparse.Namespace) -> None:
                 console.print(
                     f"  [{ROSE}]No stored GeneSPIDER file for SNR {_snr_label(snr)}[/] "
                     f"on {network_name}. Available SNR_L values: {available}. "
-                    "The N50 files are 0.01, 1, and 100 (filenames SNR10, SNR1000, SNR100000)."
+                    "The N50 files are 0.01, 1, and 100 (filenames SNR10, SNR1000, SNR100000). "
+                    "`pygs bench --snr` generates data at any SNR."
                 )
                 raise SystemExit(1)
-            else:
-                Y = stored["Y"]
-                P = stored["P"]
-                source = "genespider"
-                dataset_name = stored["name"]
-                console.print(
-                    f"  [{GREEN}]{topology} {network_name} SNR {_snr_label(snr)}[/] "
-                    f"[{DIM}]stored file {stored['name']}[/]"
+            conditions.append({
+                "topology": topology,
+                "network": network_name,
+                "A": A,
+                "snr": snr,
+                "Y": stored["Y"],
+                "P": stored["P"],
+                "source": "genespider",
+                "dataset": stored["name"],
+                "seed_offset": 1000 * network_index + 10 * snr_index,
+                "note": f"stored file {stored['name']}",
+            })
+    return conditions, f"GeneSPIDER {size} networks"
+
+
+def _simulated_conditions(
+    args: argparse.Namespace, snrs: list[float], topologies: list[str]
+) -> tuple[list[dict[str, Any]], str]:
+    """Generated networks, each scored at every requested SNR."""
+    from bench.cli import ROSE, console
+
+    unknown = [name for name in topologies if name not in TOPOLOGIES]
+    if unknown:
+        console.print(f"  [{ROSE}]Unknown topologies {unknown}; use {', '.join(TOPOLOGIES)}.[/]")
+        raise SystemExit(2)
+    if any(snr <= 0 for snr in snrs):
+        console.print(f"  [{ROSE}]SNR values must be positive.[/]")
+        raise SystemExit(2)
+    n_nodes = int(args.n_nodes)
+    n_samples = int(getattr(args, "n_samples", None) or 3 * n_nodes)
+    sparsity = float(args.sparsity)
+    seed = int(getattr(args, "seed", 42))
+    P = knockdown_design(n_nodes, n_samples)
+
+    conditions = []
+    network_index = 0
+    for topology in topologies:
+        for _ in range(int(args.n_datasets)):
+            network_seed = seed + 1000 * network_index
+            A = stable_network(n_nodes, topology, sparsity, network_seed)
+            links = int(np.count_nonzero(A) - np.count_nonzero(np.diag(A)))
+            network_name = f"sim-{topology}-N{n_nodes}-L{links}-seed{network_seed}"
+            for snr_index, snr in enumerate(snrs):
+                offset = 1000 * network_index + 10 * snr_index
+                Y = simulate_expression(A, P, snr, np.random.default_rng(seed + offset + 1))
+                conditions.append({
+                    "topology": topology,
+                    "network": network_name,
+                    "A": A,
+                    "snr": snr,
+                    "Y": Y,
+                    "P": P,
+                    "source": "simulated",
+                    "dataset": f"{network_name}-SNR{_snr_label(snr)}",
+                    "seed_offset": offset,
+                    "note": f"generated, {n_nodes} genes × {n_samples} experiments",
+                })
+            network_index += 1
+    return conditions, f"generated N{n_nodes} networks at sparsity {sparsity:g}"
+
+
+def run_snr_benchmark(args: argparse.Namespace, simulate: bool = False) -> None:
+    """Score every method on each (network, SNR) condition.
+
+    ``simulate`` generates networks and expression from the flags. Otherwise
+    the stored GeneSPIDER files are used.
+    """
+    from bench.cli import (
+        DIM,
+        GREEN,
+        ROSE,
+        TEAL,
+        _render_comparison,
+        _render_results,
+        _write_snr_figure,
+        console,
+    )
+
+    methods = _methods(args)
+    if not methods:
+        console.print(f"  [{ROSE}]No valid methods selected.[/]")
+        return
+    if not getattr(args, "snr", None):
+        console.print(f"  [{ROSE}]--snr is required.[/]")
+        return
+
+    snrs = parse_snrs(args.snr)
+    topologies = [name.strip() for name in args.topologies.split(",") if name.strip()]
+    arms = _arms(methods, args)
+    from bench.genespider import NESTBOOT_EXCLUDED
+
+    nest_methods = [name for name in methods if name not in NESTBOOT_EXCLUDED] if args.nestboot else []
+    build = _simulated_conditions if simulate else _stored_conditions
+    conditions, description = build(args, snrs, topologies)
+    n_networks = len({condition["network"] for condition in conditions})
+
+    run_dir = Path(args.output).with_name(Path(args.output).stem + "_runs")
+    csv_path = Path(args.output).with_suffix(".csv")
+    json_path = Path(args.output)
+    per_condition = len(arms) + len(nest_methods)
+    console.print(f"  [{TEAL}]Methods[/]     {', '.join(method for _, method, shuffled in arms if not shuffled)}")
+    if getattr(args, "randomize", False):
+        console.print(f"  [{TEAL}]Random[/]      gene-wise shuffle of each method")
+    if nest_methods:
+        console.print(
+            f"  [{TEAL}]NestBoot[/]    {', '.join(nest_methods)} ({args.nest_runs}×{args.boot_runs})"
+        )
+    if args.nestboot:
+        for name in methods:
+            if name in NESTBOOT_EXCLUDED:
+                console.print(f"  [{DIM}]{name} is scored directly only: {NESTBOOT_EXCLUDED[name]}[/]")
+    console.print(
+        f"  [{TEAL}]Networks[/]    {n_networks} {description} "
+        f"({args.n_datasets} per topology)"
+    )
+    console.print(f"  [{TEAL}]SNR[/]         {', '.join(_snr_label(snr) for snr in snrs)}")
+    console.print(
+        f"  [{TEAL}]Saved runs[/]  {run_dir}  ({len(conditions)} conditions × {per_condition} arms)"
+    )
+    console.print()
+
+    rows: list[dict] = []
+    seed = int(getattr(args, "seed", 42))
+    done = 0
+    for condition in conditions:
+        topology = condition["topology"]
+        network_name = condition["network"]
+        A = condition["A"]
+        snr = condition["snr"]
+        Y = condition["Y"]
+        P = condition["P"]
+        source = condition["source"]
+        dataset_name = condition["dataset"]
+        console.print(
+            f"  [{GREEN}]{topology} {network_name} SNR {_snr_label(snr)}[/] "
+            f"[{DIM}]{condition['note']}[/]"
+        )
+        condition_seed = seed + condition["seed_offset"]
+        jobs: list[tuple[str, str, bool, bool]] = [
+            (label, method, shuffled, False) for label, method, shuffled in arms
+        ]
+        jobs.extend((f"nestboot {method}", method, False, True) for method in nest_methods)
+        for job_index, (label, method, shuffled, nested) in enumerate(jobs):
+            done += 1
+            console.print(
+                f"    [{DIM}]{done}/{len(conditions) * per_condition}[/] {label} {topology}/SNR={_snr_label(snr)}"
+            )
+            expression = Y
+            if shuffled:
+                expression = shuffle_genes(
+                    Y, np.random.default_rng(condition_seed + 17 + job_index)
                 )
-            condition_seed = seed + 1000 * network_index + 10 * snr_index
-            jobs: list[tuple[str, str, bool, bool]] = [
-                (label, method, shuffled, False) for label, method, shuffled in arms
-            ]
-            jobs.extend((f"nestboot {method}", method, False, True) for method in nest_methods)
-            for job_index, (label, method, shuffled, nested) in enumerate(jobs):
-                done += 1
-                console.print(
-                    f"    [{DIM}]{done}/{conditions * per_condition}[/] {label} {topology}/SNR={_snr_label(snr)}"
-                )
-                expression = Y
-                if shuffled:
-                    expression = shuffle_genes(
-                        Y, np.random.default_rng(condition_seed + 17 + job_index)
-                    )
-                try:
-                    if nested:
-                        stack, alpha = nestboot_stack(method, expression, P, A, args)
-                    else:
-                        stack, alpha = infer_stack(method, expression, P, condition_seed + job_index)
-                except Exception as exc:
-                    error_path = json_path.with_name(json_path.stem + "_errors.json")
-                    errors = []
-                    if error_path.exists():
-                        errors = json.loads(error_path.read_text())
-                    errors.append({
-                        "dataset": dataset_name,
-                        "network": network_name,
-                        "method": label,
-                        "snr": snr,
-                        "topology": topology,
-                        "source": source,
-                        "error": str(exc)[:200],
-                    })
-                    error_path.write_text(json.dumps(errors, indent=2))
-                    console.print(f"      [{ROSE}]{exc}[/]")
-                    continue
-                filename = (
-                    f"{_slug(network_name)}__{_slug(label)}__snr_{_snr_label(snr)}.npz"
-                )
-                path = run_dir / filename
-                _save_stack(
-                    path, stack, alpha, expression, P, A,
-                    method=label, snr=snr, topology=topology,
-                    network=network_name, source=source, dataset=dataset_name,
-                )
-                rows.extend(_score_rows(
-                    A, stack, alpha,
-                    dataset=dataset_name,
-                    network=network_name,
-                    method=label,
-                    snr=snr,
-                    topology=topology,
-                    source=source,
-                    adjacency_file=str(path),
-                ))
-                _checkpoint(rows, csv_path, json_path)
+            try:
+                if nested:
+                    stack, alpha = nestboot_stack(method, expression, P, A, args)
+                else:
+                    stack, alpha = infer_stack(method, expression, P, condition_seed + job_index)
+            except Exception as exc:
+                error_path = json_path.with_name(json_path.stem + "_errors.json")
+                errors = []
+                if error_path.exists():
+                    errors = json.loads(error_path.read_text())
+                errors.append({
+                    "dataset": dataset_name,
+                    "network": network_name,
+                    "method": label,
+                    "snr": snr,
+                    "topology": topology,
+                    "source": source,
+                    "error": str(exc)[:200],
+                })
+                error_path.write_text(json.dumps(errors, indent=2))
+                console.print(f"      [{ROSE}]{exc}[/]")
+                continue
+            filename = (
+                f"{_slug(network_name)}__{_slug(label)}__snr_{_snr_label(snr)}.npz"
+            )
+            path = run_dir / filename
+            _save_stack(
+                path, stack, alpha, expression, P, A,
+                method=label, snr=snr, topology=topology,
+                network=network_name, source=source, dataset=dataset_name,
+            )
+            rows.extend(_score_rows(
+                A, stack, alpha,
+                dataset=dataset_name,
+                network=network_name,
+                method=label,
+                snr=snr,
+                topology=topology,
+                source=source,
+                adjacency_file=str(path),
+            ))
+            _checkpoint(rows, csv_path, json_path)
 
     _checkpoint(rows, csv_path, json_path)
+    summary = comparison_rows(rows)
+    console.print()
+    if any(row["method"].startswith("nestboot:") for row in summary):
+        _render_comparison(summary)
+    else:
+        _render_results(summary, f"SNR benchmark ({len(summary)} runs)")
     console.print(f"\n  [{DIM}]Scores saved to {csv_path}[/]")
     console.print(f"  [{DIM}]Inferred networks saved to {run_dir}[/]")
     if getattr(args, "plot", False):

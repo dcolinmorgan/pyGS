@@ -1,0 +1,29 @@
+{
+  "scenario": "realistic",
+  "seed": 9,
+  "genes": 232,
+  "true_links": 696,
+  "noise_sigma": 0.12646433866575874,
+  "median_knockdown_z": -2.922986034130016,
+  "real_median_knockdown_z": -2.9229860341300116,
+  "replicate_correlation_without_own_gene": 0.7255628505780074,
+  "real_replicate_correlation_without_own_gene": 0.7256505167655987,
+  "variance_share_network": 0.06705335298670721,
+  "variance_share_confounder": 0.9001844197475619,
+  "failed_knockdowns": [
+    "G006",
+    "G009",
+    "G012",
+    "G025",
+    "G047",
+    "G057",
+    "G072",
+    "G095",
+    "G138",
+    "G140",
+    "G148",
+    "G202",
+    "G204",
+    "G228"
+  ]
+}

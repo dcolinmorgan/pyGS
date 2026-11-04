@@ -7,7 +7,9 @@ F1 and MCC are still the best values over the sweep. The axis therefore says
 AUROC, not maxAUROC.
 
 Expected columns: dataset, method, auroc, f1_score (or f1), mcc.
-SNR is read from a ``snr`` column or from names such as ``SNR0.01-...``.
+SNR is read from an ``snr_l`` column when every row has one, else from
+``snr`` or from names such as ``SNR0.01-...``. ``pygs bench-gs`` JSON
+records the filename SNR in ``snr`` and SNR_L in ``snr_l``.
 
 The chapter figure also includes randomized TIGRESS, LASSO and LSCO. Those
 rows are not in the stored CSVs, and they cannot be recovered from the image.
@@ -23,6 +25,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
+from matplotlib.patches import Patch
 
 METHOD_ORDER = [
     "tigress",
@@ -58,6 +61,10 @@ def load_scores(path: Path) -> pd.DataFrame:
     if missing:
         raise SystemExit(f"{path} is missing columns: {', '.join(sorted(missing))}")
 
+    if "error" in frame.columns:
+        frame = frame[frame["error"].isna()].copy()
+    if "snr_l" in frame.columns and frame["snr_l"].notna().all():
+        frame["snr"] = frame["snr_l"]
     if "snr" not in frame.columns:
         if "dataset" not in frame.columns:
             raise SystemExit(f"{path} needs an snr column or a dataset name containing SNR")
@@ -67,7 +74,7 @@ def load_scores(path: Path) -> pd.DataFrame:
         frame["method"]
         .astype(str)
         .str.lower()
-        .str.replace(r"\s*\+\s*", " ", regex=True)
+        .str.replace(r"\s*[+:]\s*", " ", regex=True)
         .str.replace("_", " ")
         .str.replace(r"\s+", " ", regex=True)
         .str.strip()
@@ -91,6 +98,59 @@ def collapse_sparsity(frame: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+RUNS = ["direct", "NestBoot"]
+RUN_COLORS = {"direct": "#9CB4D8", "NestBoot": "#E8833A"}
+
+
+def split_runs(long: pd.DataFrame) -> pd.DataFrame:
+    """Base method and run ("direct" or "NestBoot") from names such as ``nestboot lsco``."""
+    nested = long["method"].str.startswith("nestboot ")
+    return long.assign(
+        base=long["method"].str.removeprefix("nestboot "),
+        run=nested.map({True: "NestBoot", False: "direct"}),
+    )
+
+
+def plot_split(long: pd.DataFrame, snrs: list[str], output: Path) -> None:
+    """One split violin per method: direct on one half, NestBoot on the other.
+
+    Rows are metrics and columns SNR levels, so the figure grows downward with
+    the number of methods. Methods never run through NestBoot, such as
+    TIGRESS, have only the direct half. Each run is also drawn as a point,
+    because a violin needs several networks to show a distribution.
+    """
+    long = split_runs(long)
+    bases = sorted(set(long["base"]))
+    sns.set_theme(style="whitegrid", context="notebook")
+    grid = sns.FacetGrid(
+        long,
+        row="metric",
+        col="snr",
+        row_order=[label for _, label in METRICS],
+        col_order=snrs,
+        height=0.42 * len(bases) + 1.0,
+        aspect=0.85,
+        sharex=True,
+        sharey=True,
+    )
+    common = dict(x="score", y="base", hue="run", order=bases, hue_order=RUNS, palette=RUN_COLORS, legend=False)
+    grid.map_dataframe(
+        sns.violinplot, split=True, cut=0, inner="quart", density_norm="width", linewidth=0.8, **common
+    )
+    grid.map_dataframe(
+        sns.stripplot, dodge=True, jitter=0.08, size=3.5, edgecolor="black", linewidth=0.4, **common
+    )
+    grid.set_titles(row_template="{row_name}", col_template="SNR_L = {col_name}")
+    grid.set_axis_labels("Score", "")
+    grid.set(xlim=(-0.05, 1.05))
+    handles = [Patch(facecolor=RUN_COLORS[run], edgecolor="black", label=run) for run in RUNS]
+    grid.figure.legend(handles=handles, loc="upper center", ncol=2, frameon=False, bbox_to_anchor=(0.5, 1.0))
+    grid.figure.suptitle("Direct inference and NestBoot on GeneSPIDER networks", y=1.03)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    grid.savefig(output, dpi=200, bbox_inches="tight")
+    plt.close(grid.figure)
+
+
 def plot_scores(frame: pd.DataFrame, output: Path) -> None:
     frame = collapse_sparsity(frame)
     long = frame.melt(
@@ -100,11 +160,13 @@ def plot_scores(frame: pd.DataFrame, output: Path) -> None:
         value_name="score",
     )
     long["metric"] = long["metric"].map(dict(METRICS))
-    present = [method for method in METHOD_ORDER if method in set(long["method"])]
-    extra = sorted(set(long["method"]) - set(present))
-    present.extend(extra)
+    methods = set(long["method"])
     snrs = [snr for snr in SNR_ORDER if snr in set(long["snr"])]
     snrs.extend(sorted(set(long["snr"]) - set(snrs), key=float))
+    if not methods <= set(METHOD_ORDER):
+        plot_split(long, snrs, output)
+        return
+    present = [method for method in METHOD_ORDER if method in methods]
 
     sns.set_theme(style="whitegrid", context="talk")
     grid = sns.catplot(

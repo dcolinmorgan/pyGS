@@ -1,0 +1,14 @@
+{
+  "scenario": "ideal",
+  "seed": 7,
+  "genes": 232,
+  "true_links": 696,
+  "noise_sigma": 0.456999865814907,
+  "median_knockdown_z": -2.9229860341300156,
+  "real_median_knockdown_z": -2.9229860341300116,
+  "replicate_correlation_without_own_gene": 0.02449228937415243,
+  "real_replicate_correlation_without_own_gene": 0.7256505167655987,
+  "variance_share_network": 0.058392310928131574,
+  "variance_share_confounder": 0.0,
+  "failed_knockdowns": []
+}

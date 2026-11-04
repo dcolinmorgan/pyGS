@@ -12,12 +12,15 @@ Usage::
     pygs infer https://example/ymatrix.csv -m lsco
     pygs bench --tier fast                       # synthetic benchmark
     uv run pygs bench --methods tigress,lasso,lsco \
+        --snr 0.01,0.1,1,10,100 --n-nodes 50 --sparsity 0.06 --n-datasets 3 \
+        --plot -o benchmark/plots/snr_simulated.json   # generated networks
+    pygs bench-gs --methods lasso,lsco,tigress --nestboot --sizes N50   # NestBoot benchmark; tigress direct only
+    uv run pygs bench-gs --methods tigress,lasso,lsco \
         --nestboot --nest-runs 10 --boot-runs 10 --randomize \
         --snr 0.01,1,100 --topologies random,smallworld,scalefree \
-        --n-nodes 50 --n-datasets 3 \
-        --plot -o benchmark/plots/snr_figure.json
-    uv run pygs bench --plot -o benchmark/plots/snr_figure.json
-    pygs bench-gs --tier fast --sizes N50        # GeneSpider benchmark
+        --sizes N50 --n-datasets 3 \
+        --plot -o benchmark/plots/snr_figure.json       # stored files
+    uv run pygs bench-gs --plot -o benchmark/plots/snr_figure.json
     pygs nestboot data.csv -m lsco --nest-runs 100 --boot-runs 100 --zeta=-4:0:41 --output out.npy
     pygs plot out.npy --zeta 0.063 --per-gene 3 -o edges.csv
     pygs nestboot --runs 100x100 -m lsco -f data.csv --output out.npy
@@ -38,9 +41,11 @@ import time
 import warnings
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
+from rich import box
 from rich.console import Console
 from rich.progress import (
     BarColumn,
@@ -203,120 +208,91 @@ def _render_results(data: list[dict], title: str = "Results") -> None:
             console.print(st)
 
 
-def _render_comparison(data: list[dict]) -> None:
-    """Render direct vs NestBoot comparison table with deltas."""
+COMPARISON_METRICS: tuple[tuple[str, str, float, float], ...] = (
+    ("auroc", "AUROC", 0.4, 0.7),
+    ("f1", "F1", 0.4, 0.7),
+    ("mcc", "MCC", 0.2, 0.5),
+)
+
+
+def _delta_cell(delta: float) -> str:
+    if delta > 0.01:
+        return f"[{GREEN}]▲{delta:+.3f}[/]"
+    if delta < -0.01:
+        return f"[{ROSE}]▼{delta:+.3f}[/]"
+    return f"[{DIM}]={delta:+.3f}[/]"
+
+
+def _comparison_table(
+    direct: list[dict[str, Any]], nestboot: list[dict[str, Any]], title: str, title_style: str
+) -> Table:
+    """Direct and NestBoot means with deltas for each metric, one row per method.
+
+    Every direct method is listed. A method without NestBoot rows shows
+    "excluded" when it is in NESTBOOT_EXCLUDED and "—" otherwise.
+    """
+    from bench.genespider import NESTBOOT_EXCLUDED
+
+    t = Table(
+        title=title, title_style=title_style, border_style="dim",
+        box=box.SIMPLE_HEAD, padding=(0, 0), pad_edge=False,
+    )
+    t.add_column("Method", style="bold", overflow="fold", min_width=10)
+    for index, (_, label, _, _) in enumerate(COMPARISON_METRICS):
+        t.add_column(f"{label}\ndir", justify="right", no_wrap=True, min_width=5)
+        t.add_column(f"{label}\nNB", justify="right", no_wrap=True, min_width=8 if index == 0 else 5)
+        t.add_column(f"Δ\n{label}", justify="right", no_wrap=True, min_width=7)
+    t.add_column("Runs", justify="right", no_wrap=True, min_width=4)
+
+    for method in sorted({r["method"] for r in direct}):
+        d_rows = [r for r in direct if r["method"] == method]
+        n_rows = [r for r in nestboot if r["method"] == f"nestboot:{method}"]
+        missing = "excluded" if method in NESTBOOT_EXCLUDED else "—"
+        cells = [method]
+        for key, _, lo, hi in COMPARISON_METRICS:
+            d_mean = float(np.mean([r.get(key, 0) for r in d_rows]))
+            cells.append(f"[{_color(d_mean, lo, hi)}]{d_mean:.3f}[/]")
+            if n_rows:
+                n_mean = float(np.mean([r.get(key, 0) for r in n_rows]))
+                cells.append(f"[{_color(n_mean, lo, hi)}]{n_mean:.3f}[/]")
+                cells.append(_delta_cell(n_mean - d_mean))
+            else:
+                cells.extend([f"[{DIM}]{missing}[/]", f"[{DIM}]—[/]"])
+                missing = "—"
+        cells.append(f"{len(d_rows)}/{len(n_rows)}")
+        t.add_row(*cells)
+    return t
+
+
+def _render_comparison(data: list[dict], level_key: str = "snr", level_label: str = "SNR") -> None:
+    """Direct vs NestBoot tables, overall and per noise level, with Δ AUROC, Δ F1 and Δ MCC."""
+    from bench.genespider import NESTBOOT_EXCLUDED
+
     ok = [r for r in data if not r.get("error")]
     if not ok:
         console.print("[dim]No results[/]")
         return
 
-    # Split into direct and nestboot results
     direct = [r for r in ok if not r["method"].startswith("nestboot:")]
     nestboot = [r for r in ok if r["method"].startswith("nestboot:")]
+    if level_key == "snr" and all(r.get("snr_l") is not None for r in ok):
+        level_key, level_label = "snr_l", "SNR_L"
 
-    # Get base method names
-    base_methods = sorted(set(r["method"] for r in direct))
+    console.print(_comparison_table(direct, nestboot, "Direct vs NestBoot", TEAL))
+    console.print(f"  [{DIM}]dir = direct, NB = NestBoot, Δ = NB minus direct, Runs = direct/NB.[/]")
+    for method in sorted({r["method"] for r in direct} & set(NESTBOOT_EXCLUDED)):
+        console.print(f"  [{DIM}]{method}: not wrapped in NestBoot, {NESTBOOT_EXCLUDED[method]}[/]")
 
-    # Overall comparison
-    t = Table(
-        title="Direct vs NestBoot",
-        title_style=TEAL,
-        border_style="dim",
-    )
-    t.add_column("Method", style="bold")
-    t.add_column("Direct", justify="right")
-    t.add_column("NestBoot", justify="right")
-    t.add_column("Δ AUROC", justify="right")
-    t.add_column("", min_width=22)
-    t.add_column("Direct F1", justify="right")
-    t.add_column("NB F1", justify="right")
-    t.add_column("Δ F1", justify="right")
-
-    for method in base_methods:
-        d_rows = [r for r in direct if r["method"] == method]
-        n_rows = [r for r in nestboot if r["method"] == f"nestboot:{method}"]
-        if not d_rows or not n_rows:
-            continue
-
-        d_auroc = np.mean([r.get("auroc", 0) for r in d_rows])
-        n_auroc = np.mean([r.get("auroc", 0) for r in n_rows])
-        d_f1 = np.mean([r.get("f1", 0) for r in d_rows])
-        n_f1 = np.mean([r.get("f1", 0) for r in n_rows])
-
-        delta_auroc = n_auroc - d_auroc
-        delta_f1 = n_f1 - d_f1
-
-        # Color the delta
-        if delta_auroc > 0.01:
-            dc = GREEN
-            arrow = "▲"
-        elif delta_auroc < -0.01:
-            dc = ROSE
-            arrow = "▼"
-        else:
-            dc = DIM
-            arrow = "="
-
-        t.add_row(
-            method,
-            f"[{_color(d_auroc)}]{d_auroc:.3f}[/]",
-            f"[{_color(n_auroc)}]{n_auroc:.3f}[/]",
-            f"[{dc}]{arrow} {delta_auroc:+.3f}[/]",
-            _bar(n_auroc),
-            f"[{_color(d_f1)}]{d_f1:.3f}[/]",
-            f"[{_color(n_f1)}]{n_f1:.3f}[/]",
-            f"[{dc}]{delta_f1:+.3f}[/]",
-        )
-
-    console.print(t)
-
-    # Per-SNR breakdown
-    snrs = sorted(set(r.get("snr", 0) for r in ok))
-    if len(snrs) > 1:
-        console.print()
-        for snr in snrs:
-            d_sub = [r for r in direct if r.get("snr") == snr]
-            n_sub = [r for r in nestboot if r.get("snr") == snr]
-            if not d_sub or not n_sub:
+    levels = sorted({r.get(level_key, 0) for r in ok})
+    if len(levels) > 1:
+        for level in levels:
+            d_sub = [r for r in direct if r.get(level_key) == level]
+            n_sub = [r for r in nestboot if r.get(level_key) == level]
+            if not d_sub:
                 continue
-
-            st = Table(
-                title=f"SNR={snr}",
-                title_style=f"bold {ORANGE}",
-                border_style="dim",
-                show_edge=False,
-            )
-            st.add_column("Method", style="bold", width=22)
-            st.add_column("Direct", justify="right")
-            st.add_column("NestBoot", justify="right")
-            st.add_column("Δ AUROC", justify="right")
-            st.add_column("", min_width=18)
-
-            for method in base_methods:
-                dr = [r for r in d_sub if r["method"] == method]
-                nr = [r for r in n_sub if r["method"] == f"nestboot:{method}"]
-                if not dr or not nr:
-                    continue
-                da = np.mean([r.get("auroc", 0) for r in dr])
-                na = np.mean([r.get("auroc", 0) for r in nr])
-                delta = na - da
-                if delta > 0.01:
-                    dc = GREEN
-                    arrow = "▲"
-                elif delta < -0.01:
-                    dc = ROSE
-                    arrow = "▼"
-                else:
-                    dc = DIM
-                    arrow = "="
-                st.add_row(
-                    method,
-                    f"{da:.3f}",
-                    f"[{_color(na)}]{na:.3f}[/]",
-                    f"[{dc}]{arrow} {delta:+.3f}[/]",
-                    _bar(na),
-                )
-            console.print(st)
+            console.print()
+            shown = f"{level:g}" if isinstance(level, float) else level
+            console.print(_comparison_table(d_sub, n_sub, f"{level_label}={shown}", f"bold {ORANGE}"))
 
 
 # ── Status ────────────────────────────────────────────────────────────────
@@ -481,17 +457,70 @@ def _cmd_infer(args: argparse.Namespace) -> None:
 # ── Synthetic benchmark ───────────────────────────────────────────────────
 
 
+METHOD_TIERS: dict[str, str] = {"1": "fast", "2": "medium", "3": "slow", "4": "very_slow"}
+
+
+def _pick_benchmark_methods() -> dict[str, Any]:
+    """Tiers, extra methods and NestBoot settings, the same for every data source."""
+    console.print(f"  [{TEAL}]A) Methods[/]")
+    console.print(f"    [{INDIGO}]1[/] [{DIM}]fast (lasso, lsco, elastic_net, ridge, partial_correlation, clr, genie3, neighborhood_selection)[/]")
+    console.print(f"    [{INDIGO}]2[/] [{DIM}]medium (glasso, bdeu, bge, granger_causality, transfer_entropy, pcmci)[/]")
+    console.print(f"    [{INDIGO}]3[/] [{DIM}]slow (tigress, glasso_stars, pc, fci)[/]")
+    console.print(f"    [{INDIGO}]4[/] [{DIM}]very_slow (notears, dag_gnn)[/]")
+    console.print(f"    [{INDIGO}]5[/] [{DIM}]nestboot (also run each selected method through NestBoot)[/]")
+    console.print(f"    [{INDIGO}]6[/] [{DIM}]tigress (scored directly; never wrapped in NestBoot)[/]")
+    console.print(f"    [{DIM}]Or type method names directly: scenicplus, genie3, ...[/]")
+    raw = Prompt.ask(f"  [{DIM}]Selection (comma-separated)[/]", default="1,5,6")
+
+    tiers: list[str] = []
+    extra_methods: list[str] = []
+    use_nestboot = False
+    for part in (p.strip() for p in raw.split(",")):
+        if part in METHOD_TIERS:
+            tiers.append(METHOD_TIERS[part])
+        elif part == "5":
+            use_nestboot = True
+        elif part == "6":
+            extra_methods.append("tigress")
+        elif part:
+            extra_methods.append(part)
+
+    nest_runs, boot_runs, fdr = 10, 10, 0.05
+    if use_nestboot:
+        console.print(f"\n  [{TEAL}]NestBoot config[/]")
+        nest_runs = int(Prompt.ask(f"  [{DIM}]Outer runs[/]", default="10"))
+        boot_runs = int(Prompt.ask(f"  [{DIM}]Inner runs[/]", default="10"))
+        fdr = float(Prompt.ask(f"  [{DIM}]FDR threshold[/]", default="0.05"))
+    return {
+        "tier": ",".join(tiers),
+        "extra_methods": extra_methods,
+        "nestboot": use_nestboot,
+        "nest_runs": nest_runs,
+        "boot_runs": boot_runs,
+        "fdr": fdr,
+    }
+
+
+def _resolve_methods(tier: str, extra_methods: list[str]) -> list[str]:
+    """Tier members plus named methods, registered ones only, without repeats."""
+    from bench.genespider import PYGS_METHODS, TIERS
+    from sparselink import list_methods
+
+    import sparselink.methods  # noqa: F401
+
+    names: list[str] = []
+    for name in (t.strip() for t in tier.split(",")):
+        names.extend(TIERS.get(name, []))
+    names.extend(extra_methods)
+    registered = set(list_methods())
+    return [m for m in dict.fromkeys(names) if m in registered or m in PYGS_METHODS]
+
+
 def _configure_synthetic() -> argparse.Namespace:
     """Interactive config builder for synthetic benchmark."""
     console.print(f"\n  [{TEAL}]Configure Synthetic Benchmark[/]\n")
 
-    console.print(f"  [{TEAL}]A) Method tier[/]")
-    tiers = _pick_multi(
-        "Tiers",
-        {"1": "fast", "2": "medium", "3": "slow", "4": "very_slow"},
-        default="1",
-    )
-    tier = ",".join(tiers) if tiers else "fast"
+    picked = _pick_benchmark_methods()
 
     n_nodes = int(Prompt.ask(f"\n  [{DIM}]Number of genes[/]", default="50"))
     n_datasets = int(Prompt.ask(f"  [{DIM}]Number of datasets[/]", default="5"))
@@ -504,7 +533,7 @@ def _configure_synthetic() -> argparse.Namespace:
 
     console.print()
     return argparse.Namespace(
-        tier=tier,
+        **picked,
         n_nodes=n_nodes,
         n_samples=n_nodes * 4,
         n_datasets=n_datasets,
@@ -512,6 +541,57 @@ def _configure_synthetic() -> argparse.Namespace:
         timeout=timeout,
         output=output,
     )
+
+
+BENCHMARK_SOURCES: dict[str, tuple[str, str]] = {
+    "1": (
+        "generated",
+        "New GeneSPIDER-style data: stable networks, knockdown design, any SNR_L"
+        " (pygs bench --snr)",
+    ),
+    "2": (
+        "stored-nestboot",
+        "Stored GeneSPIDER data (Bitbucket, cached in .gs_cache): every dataset,"
+        " direct vs NestBoot table (pygs bench-gs)",
+    ),
+    "3": (
+        "stored-snr",
+        "Stored GeneSPIDER data at SNR_L 0.01, 1 or 100: saves every inferred"
+        " network and the boxplot (pygs bench-gs --snr)",
+    ),
+    "4": (
+        "sparselink",
+        "sparselink synthetic data: no knockdown design, noise as a standard"
+        " deviation, not comparable with 1-3 (pygs bench)",
+    ),
+}
+
+
+def _run_benchmark_menu() -> None:
+    """One benchmark entry; the data source decides which runner is used."""
+    console.print(f"\n  [{TEAL}]Run benchmark: choose the data[/]")
+    for key, (_, label) in BENCHMARK_SOURCES.items():
+        console.print(f"    [{INDIGO}]{key}[/] [{DIM}]{label}[/]")
+    choice = Prompt.ask(
+        f"  [{DIM}]Data source[/]", choices=list(BENCHMARK_SOURCES), default="1"
+    )
+    source, _ = BENCHMARK_SOURCES[choice]
+    if source == "generated":
+        ns = _configure_snr_figure(simulate=True)
+        if ns.redraw:
+            _replot_snr_figure(ns)
+        else:
+            _run_snr_benchmark(ns, simulate=True)
+    elif source == "stored-nestboot":
+        _run_genespider_live(_configure_genespider())
+    elif source == "stored-snr":
+        ns = _configure_snr_figure()
+        if ns.redraw:
+            _replot_snr_figure(ns)
+        else:
+            _run_snr_benchmark(ns)
+    else:
+        _run_benchmark_live(_configure_synthetic())
 
 
 def _gene_dataset(X: np.ndarray, P: np.ndarray | None):
@@ -580,11 +660,15 @@ def _scores_along_sparsity(method_name: str, X: np.ndarray, P: np.ndarray | None
     return rows
 
 
-def _run_snr_benchmark(args: argparse.Namespace) -> None:
-    """Infer against GeneSPIDER true networks and save every network."""
+def _run_snr_benchmark(args: argparse.Namespace, simulate: bool = False) -> None:
+    """Infer against true networks and save every network.
+
+    ``simulate`` generates the networks and expression. Otherwise the stored
+    GeneSPIDER files are used.
+    """
     from bench.snr_benchmark import run_snr_benchmark
 
-    run_snr_benchmark(args)
+    run_snr_benchmark(args, simulate=simulate)
 
 
 
@@ -631,17 +715,24 @@ def _replot_snr_figure(args: argparse.Namespace) -> None:
     console.print(f"  [{DIM}]Figure saved to {figure} from {table}[/]")
 
 
-def _configure_snr_figure() -> argparse.Namespace:
-    """Interactive config for the GeneSPIDER-network benchmark."""
-    console.print(f"\n  [{TEAL}]Benchmark against GeneSPIDER true networks[/]\n")
-    console.print(
-        f"  [{DIM}]True networks come from the GeneSPIDER JSON files. "
-        f"Only stored expression is used. The three N50 levels are "
-        f"SNR_L 0.01, 1, and 100.[/]"
-    )
+def _configure_snr_figure(simulate: bool = False) -> argparse.Namespace:
+    """Interactive config for the SNR benchmark on stored or generated networks."""
+    if simulate:
+        console.print(f"\n  [{TEAL}]Benchmark on new GeneSPIDER-style data[/]\n")
+        console.print(
+            f"  [{DIM}]Stable networks with a single-gene knockdown design. "
+            f"Noise is scaled so each requested SNR_L is hit exactly.[/]"
+        )
+    else:
+        console.print(f"\n  [{TEAL}]Benchmark against GeneSPIDER true networks[/]\n")
+        console.print(
+            f"  [{DIM}]True networks come from the GeneSPIDER JSON files. "
+            f"Only stored expression is used. The three N50 levels are "
+            f"SNR_L 0.01, 1, and 100.[/]"
+        )
     output = Prompt.ask(
         f"  [{DIM}]Output file[/]",
-        default="benchmark/plots/snr_figure.json",
+        default="benchmark/plots/snr_simulated.json" if simulate else "benchmark/plots/snr_figure.json",
     )
     if _saved_snr_table(Path(output)) is not None:
         redraw = Prompt.ask(
@@ -652,12 +743,18 @@ def _configure_snr_figure() -> argparse.Namespace:
         if redraw == "y":
             return argparse.Namespace(output=output, redraw=True, plot=True)
 
-    methods = Prompt.ask(
-        f"  [{DIM}]Methods[/]", default="tigress,lasso,lsco"
-    )
-    snr = Prompt.ask(f"  [{DIM}]SNR values[/]", default="0.01,1,100")
+    picked = _pick_benchmark_methods()
+    methods = ",".join(_resolve_methods(picked["tier"], picked["extra_methods"]))
+    console.print()
+    snr_hint = "any positive SNR_L" if simulate else "0.01, 1 or 100"
+    snr = Prompt.ask(f"  [{DIM}]SNR values ({snr_hint})[/]", default="0.01,1,100")
     n_nodes = int(Prompt.ask(f"  [{DIM}]Genes per network[/]", default="50"))
     sizes = f"N{n_nodes}"
+    sparsity = 0.06
+    n_samples = None
+    if simulate:
+        sparsity = float(Prompt.ask(f"  [{DIM}]True-network edge density[/]", default="0.06"))
+        n_samples = int(Prompt.ask(f"  [{DIM}]Experiments per network[/]", default=str(3 * n_nodes)))
     n_datasets = int(
         Prompt.ask(f"  [{DIM}]Networks per topology[/]", default="3")
     )
@@ -670,16 +767,6 @@ def _configure_snr_figure() -> argparse.Namespace:
         choices=["y", "n"],
         default="y",
     )
-    use_nestboot = Prompt.ask(
-        f"  [{DIM}]NestBoot for lasso and lsco?[/]",
-        choices=["y", "n"],
-        default="y",
-    )
-    nest_runs, boot_runs, fdr = 10, 10, 0.05
-    if use_nestboot == "y":
-        nest_runs = int(Prompt.ask(f"  [{DIM}]Outer runs[/]", default="10"))
-        boot_runs = int(Prompt.ask(f"  [{DIM}]Inner runs[/]", default="10"))
-        fdr = float(Prompt.ask(f"  [{DIM}]FDR threshold[/]", default="0.05"))
     plot = Prompt.ask(
         f"  [{DIM}]Write the boxplot when the run finishes?[/]",
         choices=["y", "n"],
@@ -693,11 +780,13 @@ def _configure_snr_figure() -> argparse.Namespace:
         topologies=topologies,
         n_datasets=n_datasets,
         n_nodes=n_nodes,
+        sparsity=sparsity,
+        n_samples=n_samples,
         randomize=randomize == "y",
-        nestboot=use_nestboot == "y",
-        nest_runs=nest_runs,
-        boot_runs=boot_runs,
-        fdr=fdr,
+        nestboot=picked["nestboot"],
+        nest_runs=picked["nest_runs"],
+        boot_runs=picked["boot_runs"],
+        fdr=picked["fdr"],
         plot=plot == "y",
         output=output,
         seed=42,
@@ -706,40 +795,51 @@ def _configure_snr_figure() -> argparse.Namespace:
     )
 
 
+def _redraw_only(args: argparse.Namespace) -> bool:
+    """``--plot`` without ``--snr`` redraws the saved score table at ``-o``."""
+    if not getattr(args, "plot", False) or getattr(args, "snr", None):
+        return False
+    if getattr(args, "methods", None):
+        console.print(
+            f"  [{ORANGE}]--plot without --snr redraws a saved score table.[/] "
+            "Pass --snr to run the benchmark, or drop --methods to redraw."
+        )
+        raise SystemExit(2)
+    _replot_snr_figure(args)
+    return True
+
+
 def _run_benchmark_live(args: argparse.Namespace) -> None:
     """Run synthetic benchmark using sparselink methods."""
-    if getattr(args, "plot", False) and not getattr(args, "snr", None):
-        if getattr(args, "methods", None):
-            console.print(
-                f"  [{ORANGE}]--plot without --snr redraws a saved score table.[/] "
-                "Pass --snr to run the benchmark, or drop --methods to redraw."
-            )
-            raise SystemExit(2)
-        _replot_snr_figure(args)
+    if _redraw_only(args):
         return
     if getattr(args, "snr", None):
-        _run_snr_benchmark(args)
+        _run_snr_benchmark(args, simulate=True)
         return
     warnings.simplefilter("ignore")
 
-    from sparselink import list_methods
-    from sparselink.bench.run_benchmark import TIERS, run_single
+    from sparselink.bench.run_benchmark import run_single
     from sparselink.bench.synthetic import generate_data, generate_network
 
     import sparselink.methods  # noqa: F401
 
-    selected_tiers = [t.strip() for t in args.tier.split(",")]
-    methods: list[str] = []
-    for t in selected_tiers:
-        methods.extend(TIERS.get(t, []))
-    registered = set(list_methods())
-    methods = [m for m in methods if m in registered]
+    from bench.genespider import NESTBOOT_EXCLUDED, PYGS_METHODS
+
+    methods = [
+        m for m in _resolve_methods(args.tier, list(getattr(args, "extra_methods", [])))
+        if m not in PYGS_METHODS
+    ]
+    use_nestboot = bool(getattr(args, "nestboot", False))
+    nb_methods = [m for m in methods if m not in NESTBOOT_EXCLUDED] if use_nestboot else []
+    if not methods:
+        console.print(f"  [{ROSE}]No valid methods selected.[/]")
+        return
 
     sparsities = [0.02, 0.06, 0.1]
     noise_levels = [0.01, 0.1, 1.0]
     topologies = ["random", "scalefree", "smallworld"]
     total = (
-        len(methods)
+        (len(methods) + len(nb_methods))
         * len(topologies)
         * len(sparsities)
         * len(noise_levels)
@@ -747,6 +847,14 @@ def _run_benchmark_live(args: argparse.Namespace) -> None:
     )
 
     console.print(f"  [{TEAL}]Methods[/]       {', '.join(methods)}")
+    if use_nestboot:
+        console.print(
+            f"  [{TEAL}]NestBoot[/]      {', '.join(nb_methods) or 'no methods'}"
+            f" ({args.nest_runs}×{args.boot_runs}, FDR={args.fdr})"
+        )
+        for name in methods:
+            if name in NESTBOOT_EXCLUDED:
+                console.print(f"  [{DIM}]{name} is scored directly only: {NESTBOOT_EXCLUDED[name]}[/]")
     console.print(f"  [{TEAL}]Topologies[/]    {topologies}")
     console.print(f"  [{TEAL}]Nodes[/]         {args.n_nodes}")
     console.print(f"  [{TEAL}]Datasets[/]      {args.n_datasets}")
@@ -781,10 +889,16 @@ def _run_benchmark_live(args: argparse.Namespace) -> None:
                         )
                         X = generate_data(
                             true_net,
-                            n_samples=args.n_samples,
+                            n_samples=args.n_samples or 200,
                             noise_std=noise_std,
                             seed=ds_seed,
                         )
+                        condition = {"sparsity": sp, "noise_std": noise_std}
+                        ds_meta = {
+                            "path": f"synthetic-{topo}-sp{sp}-noise{noise_std}-{ds_idx}",
+                            "n_genes": args.n_nodes,
+                            "snr": None,
+                        }
                         for method_name in methods:
                             progress.update(
                                 task,
@@ -793,6 +907,26 @@ def _run_benchmark_live(args: argparse.Namespace) -> None:
                                     f" {topo}/sp={sp}/noise={noise_std}"
                                 ),
                             )
+                            if use_nestboot:
+                                r_direct = _run_direct_fair(
+                                    method_name, X, None, true_net, ds_meta,
+                                    topo, ds_meta["path"], args.timeout,
+                                )
+                                results.append({**r_direct, **condition})
+                                progress.advance(task)
+                                if method_name not in nb_methods:
+                                    continue
+                                progress.update(
+                                    task,
+                                    description=f"NB:{method_name:17s} {topo}/sp={sp}/noise={noise_std}",
+                                )
+                                r_nb = _run_nestboot_on_gs(
+                                    method_name, X, None, true_net, ds_meta,
+                                    topo, ds_meta["path"], args,
+                                )
+                                results.append({**r_nb, **condition})
+                                progress.advance(task)
+                                continue
                             r = run_single(
                                 method_name,
                                 X,
@@ -808,7 +942,10 @@ def _run_benchmark_live(args: argparse.Namespace) -> None:
                             results.append(asdict(r))
                             progress.advance(task)
 
-    _render_results(results, f"Synthetic Benchmark ({total} runs)")
+    if use_nestboot:
+        _render_comparison(results, level_key="noise_std", level_label="noise std")
+    else:
+        _render_results(results, f"Synthetic Benchmark ({total} runs)")
     with open(args.output, "w") as f:
         json.dump(results, f, indent=2)
     console.print(f"\n  [{DIM}]Results saved to {args.output}[/]")
@@ -818,47 +955,10 @@ def _run_benchmark_live(args: argparse.Namespace) -> None:
 
 
 def _configure_genespider() -> argparse.Namespace:
-    """Interactive config builder for GeneSpider benchmark."""
-    console.print(f"\n  [{TEAL}]Configure GeneSpider Benchmark[/]\n")
+    """Interactive config builder for the NestBoot benchmark on GeneSPIDER data."""
+    console.print(f"\n  [{TEAL}]Configure NestBoot Benchmark (GeneSPIDER data)[/]\n")
 
-    console.print(f"  [{TEAL}]A) Method tier / method names[/]")
-    console.print(f"    [{INDIGO}]1[/] [{DIM}]fast (lasso, lsco, elastic_net, ridge, ...)[/]")
-    console.print(f"    [{INDIGO}]2[/] [{DIM}]medium (glasso, bdeu, bge, ...)[/]")
-    console.print(f"    [{INDIGO}]3[/] [{DIM}]slow (tigress, glasso_stars, pc, fci)[/]")
-    console.print(f"    [{INDIGO}]4[/] [{DIM}]nestboot (wrap selected methods in NestBoot)[/]")
-    console.print(f"    [{DIM}]Or type method names directly: scenicplus, genie3, ...[/]")
-    raw = Prompt.ask(f"  [{DIM}]Selection (comma-separated)[/]", default="1")
-
-    tier_map = {"1": "fast", "2": "medium", "3": "slow", "4": "nestboot"}
-    parts = [p.strip() for p in raw.split(",")]
-
-    tiers = []
-    extra_methods: list[str] = []
-    for p in parts:
-        if p in tier_map:
-            tiers.append(tier_map[p])
-        elif p:
-            extra_methods.append(p)
-
-    use_nestboot = "nestboot" in tiers
-    tier_names = [t for t in tiers if t != "nestboot"]
-    tier = ",".join(tier_names) if tier_names else ""
-
-    # NestBoot params
-    nest_runs = 0
-    boot_runs = 0
-    fdr = 0.05
-    if use_nestboot:
-        console.print(f"\n  [{TEAL}]NestBoot config[/]")
-        nest_runs = int(
-            Prompt.ask(f"  [{DIM}]Outer runs[/]", default="10")
-        )
-        boot_runs = int(
-            Prompt.ask(f"  [{DIM}]Inner runs[/]", default="10")
-        )
-        fdr = float(
-            Prompt.ask(f"  [{DIM}]FDR threshold[/]", default="0.05")
-        )
+    picked = _pick_benchmark_methods()
 
     console.print(f"\n  [{TEAL}]B) Network sizes[/]")
     sizes = _pick_multi(
@@ -868,8 +968,8 @@ def _configure_genespider() -> argparse.Namespace:
     )
     sizes_str = ",".join(sizes) if sizes else "N50"
 
-    console.print(f"\n  [{TEAL}]C) Max datasets per size[/]")
-    max_ds = int(Prompt.ask(f"  [{DIM}]0 = all[/]", default="0"))
+    console.print(f"\n  [{TEAL}]C) Networks per size, each scored at SNR_L 0.01, 1 and 100[/]")
+    max_networks = int(Prompt.ask(f"  [{DIM}]0 = all[/]", default="5"))
 
     timeout = int(
         Prompt.ask(f"\n  [{DIM}]Timeout per method (seconds)[/]", default="120")
@@ -877,54 +977,61 @@ def _configure_genespider() -> argparse.Namespace:
     output = Prompt.ask(
         f"  [{DIM}]Output file[/]", default="benchmark_genespider.json"
     )
+    figure = Prompt.ask(
+        f"  [{DIM}]Write the boxplot when the run finishes?[/]",
+        choices=["y", "n"],
+        default="y",
+    )
 
     console.print()
     return argparse.Namespace(
-        tier=tier,
+        **picked,
         sizes=sizes_str,
-        max_datasets=max_ds,
+        max_datasets=0,
+        max_networks=max_networks,
         timeout=timeout,
         output=output,
-        nestboot=use_nestboot,
-        nest_runs=nest_runs,
-        boot_runs=boot_runs,
-        fdr=fdr,
         seed=42,
-        extra_methods=extra_methods,
+        figure=figure == "y",
     )
 
 
 def _run_genespider_live(args: argparse.Namespace) -> None:
     """Run GeneSpider benchmark using sparselink methods on real data."""
+    if _redraw_only(args):
+        return
+    if getattr(args, "snr", None):
+        _run_snr_benchmark(args)
+        return
     warnings.simplefilter("ignore")
 
-    from bench.genespider import TIERS, PYGS_METHODS, _list_datasets, load_dataset, run_single
-    from sparselink import list_methods
-
-    import sparselink.methods  # noqa: F401
+    from bench.genespider import (
+        NESTBOOT_EXCLUDED,
+        _list_datasets,
+        complete_networks,
+        load_dataset,
+        run_single,
+        stored_snr_l,
+    )
 
     # Parse tiers — "nestboot" in the tier list enables NestBoot wrapping
     selected_tiers = [t.strip() for t in args.tier.split(",") if t.strip()]
     use_nestboot = getattr(args, "nestboot", False) or "nestboot" in selected_tiers
     method_tiers = [t for t in selected_tiers if t != "nestboot"]
 
-    methods: list[str] = []
-    for t in method_tiers:
-        methods.extend(TIERS.get(t, []))
-
-    # Add extra methods typed directly by name
-    extra = getattr(args, "extra_methods", [])
-    methods.extend(extra)
-
-    # Filter to valid methods
-    registered = set(list_methods())
-    methods = [m for m in methods if m in registered or m in PYGS_METHODS]
+    named = [n.strip() for n in (getattr(args, "methods", None) or "").split(",") if n.strip()]
+    methods = _resolve_methods(
+        "" if named else ",".join(method_tiers),
+        named + list(getattr(args, "extra_methods", [])),
+    )
 
     if not methods:
         console.print(f"  [{ROSE}]No valid methods selected.[/]")
         return
 
     sizes = [s.strip() for s in args.sizes.split(",")]
+    nb_methods = [m for m in methods if m not in NESTBOOT_EXCLUDED] if use_nestboot else []
+    skipped = [m for m in methods if m in NESTBOOT_EXCLUDED] if use_nestboot else []
 
     console.print(f"  [{TEAL}]Methods[/]  {', '.join(methods)}")
     console.print(f"  [{TEAL}]Sizes[/]    {sizes}")
@@ -932,8 +1039,12 @@ def _run_genespider_live(args: argparse.Namespace) -> None:
     if use_nestboot:
         console.print(
             f"  [{TEAL}]NestBoot[/] {args.nest_runs}×{args.boot_runs},"
-            f" FDR={args.fdr}"
+            f" FDR={args.fdr}, on {', '.join(nb_methods) or 'no methods'}"
         )
+        for name in skipped:
+            console.print(
+                f"  [{DIM}]{name} is scored directly only: {NESTBOOT_EXCLUDED[name]}[/]"
+            )
     console.print()
 
     progress = Progress(
@@ -949,32 +1060,33 @@ def _run_genespider_live(args: argparse.Namespace) -> None:
 
     for size in sizes:
         console.print(f"  [{INDIGO}]Fetching {size} datasets...[/]")
-        datasets = _list_datasets(size)
-        if args.max_datasets > 0:
-            datasets = datasets[: args.max_datasets]
+        listed = _list_datasets(size)
+        max_networks = int(getattr(args, "max_networks", 0) or 0)
+        if max_networks or not args.max_datasets:
+            loaded, skipped = complete_networks(listed, size, max_networks)
+        else:
+            loaded, skipped = [], []
+            for ds_meta in listed[: args.max_datasets]:
+                try:
+                    loaded.append((ds_meta, load_dataset(ds_meta, size)))
+                except Exception as exc:
+                    skipped.append(f"{ds_meta['path'].rsplit('/', 1)[-1]}: {str(exc)[:120]}")
+        for reason in skipped:
+            console.print(f"  [{ORANGE}]Skipped {reason}[/]")
 
-        total = len(datasets) * len(methods)
-        if use_nestboot:
-            # Run both direct and nestboot for comparison
-            total *= 2
+        per_dataset = len(methods) + len(nb_methods)
+        total = len(loaded) * per_dataset
+        n_networks = len({meta["network_id"] for meta, _ in loaded})
         console.print(
-            f"  [{DIM}]{len(datasets)} datasets × {len(methods)}"
-            f" methods"
-            f"{' × 2 (direct + nestboot)' if use_nestboot else ''}"
+            f"  [{DIM}]{n_networks} networks, {len(loaded)} datasets × ({len(methods)} direct"
+            f"{f' + {len(nb_methods)} nestboot' if use_nestboot else ''})"
             f" = {total} runs[/]"
         )
 
         with progress:
             task = progress.add_task(f"{size}", total=total)
-            for ds_meta in datasets:
-                try:
-                    X, P, A_true, topology, net_name = load_dataset(
-                        ds_meta, size
-                    )
-                except Exception:
-                    advance_n = len(methods) * (2 if use_nestboot else 1)
-                    progress.advance(task, advance_n)
-                    continue
+            for ds_meta, (X, P, A_true, topology, net_name) in loaded:
+                snr_l = stored_snr_l(ds_meta)
 
                 for method_name in methods:
                     snr = ds_meta["snr"]
@@ -989,8 +1101,10 @@ def _run_genespider_live(args: argparse.Namespace) -> None:
                             method_name, X, P, A_true, ds_meta,
                             topology, net_name, args.timeout,
                         )
-                        results.append(r_direct)
+                        results.append({**r_direct, "snr_l": snr_l})
                         progress.advance(task)
+                        if method_name in NESTBOOT_EXCLUDED:
+                            continue
 
                         # Run nestboot
                         progress.update(
@@ -1007,7 +1121,7 @@ def _run_genespider_live(args: argparse.Namespace) -> None:
                             net_name,
                             args,
                         )
-                        results.append(r_nb)
+                        results.append({**r_nb, "snr_l": snr_l})
                         progress.advance(task)
                     else:
                         progress.update(
@@ -1024,17 +1138,21 @@ def _run_genespider_live(args: argparse.Namespace) -> None:
                             args.timeout,
                             P,
                         )
-                        results.append(asdict(r))
+                        results.append({**asdict(r), "snr_l": snr_l})
                         progress.advance(task)
 
     if use_nestboot:
         _render_comparison(results)
     else:
-        _render_results(results, f"GeneSpider Benchmark ({len(results)} runs)")
+        _render_results(results, f"NestBoot Benchmark, direct only ({len(results)} runs)")
 
     with open(args.output, "w") as f:
         json.dump(results, f, indent=2)
     console.print(f"\n  [{DIM}]Results saved to {args.output}[/]")
+    if getattr(args, "figure", False):
+        figure = Path(args.output).with_suffix(".png")
+        _write_snr_figure(Path(args.output), figure)
+        console.print(f"  [{DIM}]Figure saved to {figure}[/]")
 
 
 def _run_direct_fair(
@@ -1171,10 +1289,10 @@ def _run_nestboot_on_gs(
         Y = dataset.data.Y  # type: ignore[union-attr]
         P_mat = dataset.data.P  # type: ignore[union-attr]
         X_in = Y.T
-        P_in = P_mat.T if P_mat is not None else None
+        P_in = P_mat.T if P_mat is not None and P is not None else None
         _call_count[0] += 1
 
-        if method_name in {"lasso", "lsco"}:
+        if method_name in {"lasso", "lsco"} and P is not None:
             # Same zeta stack as the direct methods. NestBoot keeps one
             # support network per zeta; do not binarize before that.
             zeta = np.logspace(-6, 0, 30)
@@ -1632,7 +1750,7 @@ def _cmd_plot_nestboot(args: argparse.Namespace) -> None:
     url = (
         graphistry.edges(edges, "regulator", "target")
         .nodes(nodes, "gene")
-        .bind(point_title="gene", edge_title="title", edge_weight="mean_support")
+        .bind(point_title="gene", edge_title="title")
         .encode_edge_color(
             "sign",
             categorical_mapping={"activation": "#2e7d32", "repression": "#c62828"},
@@ -1703,7 +1821,10 @@ def _cmd_show(args: argparse.Namespace) -> None:
     """Render a previous result JSON."""
     with open(args.file) as f:
         data = json.load(f)
-    _render_results(data, f"Results from {args.file}")
+    if any(str(r.get("method", "")).startswith("nestboot:") for r in data):
+        _render_comparison(data)
+    else:
+        _render_results(data, f"Results from {args.file}")
 
 
 def _cmd_dashboard(args: argparse.Namespace) -> None:
@@ -1774,13 +1895,11 @@ _MENU = {
     "1": ("status_methods", "Status & available methods"),
     "2": ("synthetic_guide", "Generate synthetic data & networks"),
     "3": ("infer", "Infer a network"),
-    "4": ("bench", "Run synthetic benchmark"),
-    "5": ("bench-gs", "Run GeneSpider benchmark (+ NestBoot)"),
-    "6": ("evaluate", "Evaluate predicted GRN vs gold standard"),
-    "7": ("plot", "Plot a gene regulatory network"),
-    "8": ("dashboard", "Generate interactive HTML dashboard"),
-    "9": ("show", "Render a previous result JSON"),
-    "10": ("snr-figure", "Benchmark against GeneSPIDER true networks"),
+    "4": ("bench", "Run benchmark (new, stored GeneSPIDER or sparselink data)"),
+    "5": ("evaluate", "Evaluate predicted GRN vs gold standard"),
+    "6": ("plot", "Plot a gene regulatory network"),
+    "7": ("dashboard", "Generate interactive HTML dashboard"),
+    "8": ("show", "Render a previous result JSON"),
 }
 
 
@@ -2258,12 +2377,7 @@ def _interactive() -> None:
                 _interactive_infer()
 
             elif cmd == "bench":
-                ns = _configure_synthetic()
-                _run_benchmark_live(ns)
-
-            elif cmd == "bench-gs":
-                ns = _configure_genespider()
-                _run_genespider_live(ns)
+                _run_benchmark_menu()
 
             elif cmd == "evaluate":
                 pred = Prompt.ask(
@@ -2320,13 +2434,6 @@ def _interactive() -> None:
                 if path:
                     _cmd_show(argparse.Namespace(file=path))
 
-            elif cmd == "snr-figure":
-                ns = _configure_snr_figure()
-                if ns.redraw:
-                    _replot_snr_figure(ns)
-                else:
-                    _run_snr_benchmark(ns)
-
             console.print()
 
     except KeyboardInterrupt:
@@ -2377,34 +2484,38 @@ def main() -> None:
     # bench (synthetic)
     bp = subs.add_parser(
         "bench",
-        help="Synthetic benchmark, or the stored GeneSPIDER SNR figure",
+        help="Synthetic benchmark, or an SNR benchmark on generated networks",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "Compare inferred networks to GeneSPIDER true networks. The true\n"
-            "network and knockdown design come from the GeneSPIDER JSON files.\n"
-            "Only stored GeneSPIDER expression is used. The three N50 levels\n"
-            "are SNR_L 0.01, 1, and 100 (filenames SNR10, SNR1000, SNR100000).\n"
-            "A value with no matching file stops the run.\n"
+            "With --snr, generate new networks and data from the flags and\n"
+            "score inference against them. Each network has --n-nodes genes,\n"
+            "one of --topologies, and --sparsity edge density. Its diagonal is\n"
+            "shifted until every eigenvalue has a negative real part and\n"
+            "cond(A) <= N/2. The design repeats single-gene knockdowns over\n"
+            "--n-samples experiments (default 3 per gene, as in the GeneSPIDER\n"
+            "N50 files). Expression is Y = -pinv(A) P + E, with E scaled so\n"
+            "SNR_L is each --snr value. Any positive SNR works. For the stored\n"
+            "GeneSPIDER files, use `pygs bench-gs --snr`.\n"
             "--randomize also scores each method on gene-wise shuffled\n"
-            "expression. --nestboot adds NestBoot for lasso and lsco.\n"
+            "expression. --nestboot adds NestBoot for every method except tigress.\n"
             "\n"
             "  uv run pygs bench \\\n"
             "    --methods tigress,lasso,lsco \\\n"
             "    --nestboot --nest-runs 10 --boot-runs 10 \\\n"
             "    --randomize \\\n"
-            "    --snr 0.01,1,100 \\\n"
+            "    --snr 0.01,0.1,1,10,100 \\\n"
             "    --topologies random,smallworld,scalefree \\\n"
-            "    --n-nodes 50 --n-datasets 3 \\\n"
-            "    --plot -o benchmark/plots/snr_figure.json\n"
+            "    --n-nodes 50 --sparsity 0.06 --n-datasets 3 \\\n"
+            "    --plot -o benchmark/plots/snr_simulated.json\n"
             "\n"
             "Writes the score table after each condition and every inferred\n"
-            "network under snr_figure_runs/. --plot writes the boxplot when\n"
-            "the run finishes. The same run is item 10 in `uv run pygs`.\n"
+            "network, with its true network, under snr_simulated_runs/.\n"
+            "--plot writes the boxplot when the run finishes.\n"
             "\n"
             "Redraw that figure from the saved table, including a partial\n"
             "CSV, without running inference again:\n"
             "\n"
-            "  uv run pygs bench --plot -o benchmark/plots/snr_figure.json"
+            "  uv run pygs bench --plot -o benchmark/plots/snr_simulated.json"
         ),
     )
     bp.add_argument("--tier", default="fast")
@@ -2412,9 +2523,8 @@ def main() -> None:
     bp.add_argument(
         "--snr",
         default=None,
-        help="Comma-separated SNR_L values. N50 files are 0.01, 1, and 100. A value with no stored file stops the run",
+        help="Comma-separated SNR_L values. Generates networks and data at each value",
     )
-    bp.add_argument("--sizes", default="N50", help="GeneSPIDER size to load, e.g. N50")
     bp.add_argument("--topologies", default="random,smallworld,scalefree")
     bp.add_argument("--sparsity", type=float, default=0.06, help="True-network edge density in SNR mode")
     bp.add_argument("--randomize", action="store_true", help="Also score each method on gene-wise shuffled data")
@@ -2428,7 +2538,12 @@ def main() -> None:
         help="Write the SNR boxplot. Without --snr, redraw it from the saved table at -o",
     )
     bp.add_argument("--n-nodes", type=int, default=50)
-    bp.add_argument("--n-samples", type=int, default=200)
+    bp.add_argument(
+        "--n-samples",
+        type=int,
+        default=None,
+        help="Experiments per dataset. Default 3 per gene with --snr, else 200",
+    )
     bp.add_argument("--n-datasets", type=int, default=5)
     bp.add_argument("--seed", type=int, default=42)
     bp.add_argument("--timeout", type=int, default=60)
@@ -2436,16 +2551,72 @@ def main() -> None:
 
     # bench-gs (GeneSpider)
     gp = subs.add_parser(
-        "bench-gs", help="GeneSpider benchmark (real data)"
+        "bench-gs",
+        help="NestBoot benchmark on stored GeneSPIDER data (direct vs NestBoot)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Without --snr, run every stored dataset of --sizes. With --nestboot\n"
+            "(or tier nestboot) each method is scored directly and through\n"
+            "NestBoot. TIGRESS is scored directly only: it already bootstraps\n"
+            "through stability selection, so its NestBoot column reads\n"
+            "'excluded'.\n"
+            "\n"
+            "With --snr, compare inferred networks to GeneSPIDER true networks.\n"
+            "The true network, knockdown design and expression all come from\n"
+            "the stored GeneSPIDER JSON files at the pinned commits. The three\n"
+            "N50 levels are SNR_L 0.01, 1, and 100 (filenames SNR10, SNR1000,\n"
+            "SNR100000). A value with no stored file stops the run before any\n"
+            "inference; `pygs bench --snr` generates data at other values.\n"
+            "--randomize also scores each method on gene-wise shuffled\n"
+            "expression. --nestboot adds NestBoot for every method except tigress.\n"
+            "\n"
+            "  uv run pygs bench-gs \\\n"
+            "    --methods tigress,lasso,lsco \\\n"
+            "    --nestboot --nest-runs 10 --boot-runs 10 \\\n"
+            "    --randomize \\\n"
+            "    --snr 0.01,1,100 \\\n"
+            "    --topologies random,smallworld,scalefree \\\n"
+            "    --sizes N50 --n-datasets 3 \\\n"
+            "    --plot -o benchmark/plots/snr_figure.json\n"
+            "\n"
+            "Writes the score table after each condition and every inferred\n"
+            "network under snr_figure_runs/. The same run is item 10 in\n"
+            "`uv run pygs`. Redraw the figure from the saved table:\n"
+            "\n"
+            "  uv run pygs bench-gs --plot -o benchmark/plots/snr_figure.json"
+        ),
     )
     gp.add_argument(
         "--tier", default="fast",
-        help="Comma-separated: fast,medium,slow,nestboot",
+        help="Comma-separated: fast,medium,slow,very_slow,nestboot",
+    )
+    gp.add_argument("--methods", default=None, help="Comma-separated methods; overrides --tier")
+    gp.add_argument(
+        "--snr",
+        default=None,
+        help="Comma-separated SNR_L values of stored files. N50 has 0.01, 1, and 100",
     )
     gp.add_argument(
-        "--sizes", default="N50", help="Comma-separated: N10,N50,N100"
+        "--sizes", default="N50", help="Comma-separated: N10,N50,N100. One size with --snr"
     )
-    gp.add_argument("--max-datasets", type=int, default=0, help="0 = all")
+    gp.add_argument("--topologies", default="random,smallworld,scalefree")
+    gp.add_argument(
+        "--n-datasets", type=int, default=3, help="Networks per topology with --snr (0 = all)"
+    )
+    gp.add_argument("--randomize", action="store_true", help="Also score each method on gene-wise shuffled data")
+    gp.add_argument(
+        "--plot",
+        action="store_true",
+        help="Write the SNR boxplot. Without --snr, redraw it from the saved table at -o",
+    )
+    gp.add_argument(
+        "--max-networks", type=int, default=0,
+        help="Networks per size, each at every stored SNR; incomplete networks are skipped (0 = all)",
+    )
+    gp.add_argument(
+        "--max-datasets", type=int, default=0,
+        help="First N dataset files in listing order, ignoring networks; overridden by --max-networks",
+    )
     gp.add_argument("--timeout", type=int, default=120)
     gp.add_argument(
         "--nestboot", action="store_true",

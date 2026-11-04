@@ -194,3 +194,7 @@ benchmark_gs.log
 # Editor / tool caches
 .kiro/
 .DS_Store
+
+# NestBoot run arrays; regenerate with nestboot_report/run_*.sh
+nestboot_report/runs_*/*.npy
+nestboot_report/runs_*/*.npz

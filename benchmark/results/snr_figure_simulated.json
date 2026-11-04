@@ -1,0 +1,1946 @@
+[
+  {
+    "dataset": "SNR0.01-random-ID0",
+    "method": "tigress",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.7929164017458665,
+    "f1_score": 0.4163568773234201,
+    "mcc": 0.38304121572473065
+  },
+  {
+    "dataset": "SNR0.01-random-ID0",
+    "method": "lasso",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.5409636666881675,
+    "f1_score": 0.12403100775193798,
+    "mcc": 0.12023588669984825
+  },
+  {
+    "dataset": "SNR0.01-random-ID0",
+    "method": "lsco",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.5,
+    "f1_score": 0.10880626223091977,
+    "mcc": 0.03128955289127502
+  },
+  {
+    "dataset": "SNR0.01-random-ID0",
+    "method": "random tigress",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.5236478288780566,
+    "f1_score": 0.12407991587802314,
+    "mcc": 0.049453602467917177
+  },
+  {
+    "dataset": "SNR0.01-random-ID0",
+    "method": "random lasso",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.5016079540742514,
+    "f1_score": 0.057692307692307696,
+    "mcc": 0.05430215318100723
+  },
+  {
+    "dataset": "SNR0.01-random-ID0",
+    "method": "random lsco",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.519367630210493,
+    "f1_score": 0.11509338717819283,
+    "mcc": 0.09157732627598432
+  },
+  {
+    "dataset": "SNR0.01-random-ID0",
+    "method": "nestboot lasso",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.5024925591810031,
+    "f1_score": 0.08743169398907104,
+    "mcc": 0.03208755792911192
+  },
+  {
+    "dataset": "SNR0.01-random-ID0",
+    "method": "nestboot lsco",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.5136745206085346,
+    "f1_score": 0.10857495373226403,
+    "mcc": 0.05430215318100723
+  },
+  {
+    "dataset": "SNR0.1-random-ID0",
+    "method": "tigress",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.7986586560759779,
+    "f1_score": 0.422360248447205,
+    "mcc": 0.3858196248987151
+  },
+  {
+    "dataset": "SNR0.1-random-ID0",
+    "method": "lasso",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.542751306174728,
+    "f1_score": 0.14049586776859505,
+    "mcc": 0.14169223567427816
+  },
+  {
+    "dataset": "SNR0.1-random-ID0",
+    "method": "lsco",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.5964480647727517,
+    "f1_score": 0.16393442622950818,
+    "mcc": 0.10249567908219534
+  },
+  {
+    "dataset": "SNR0.1-random-ID0",
+    "method": "random tigress",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.5696426871108735,
+    "f1_score": 0.1342281879194631,
+    "mcc": 0.06816550083742194
+  },
+  {
+    "dataset": "SNR0.1-random-ID0",
+    "method": "random lasso",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.5,
+    "f1_score": 0,
+    "mcc": 0
+  },
+  {
+    "dataset": "SNR0.1-random-ID0",
+    "method": "random lsco",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.5146343785802703,
+    "f1_score": 0.10982888977317946,
+    "mcc": 0.06379559781077504
+  },
+  {
+    "dataset": "SNR0.1-random-ID0",
+    "method": "nestboot lasso",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.5723348967499977,
+    "f1_score": 0.14492753623188406,
+    "mcc": 0.0795834631089891
+  },
+  {
+    "dataset": "SNR0.1-random-ID0",
+    "method": "nestboot lsco",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.6189348494481968,
+    "f1_score": 0.16482164821648215,
+    "mcc": 0.11126918754097444
+  },
+  {
+    "dataset": "SNR1-random-ID0",
+    "method": "tigress",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.7953506015621881,
+    "f1_score": 0.42402826855123676,
+    "mcc": 0.3909156906404386
+  },
+  {
+    "dataset": "SNR1-random-ID0",
+    "method": "lasso",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.5235833264223559,
+    "f1_score": 0.0935672514619883,
+    "mcc": 0.11566759381452554
+  },
+  {
+    "dataset": "SNR1-random-ID0",
+    "method": "lsco",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.74512776093547,
+    "f1_score": 0.43137254901960786,
+    "mcc": 0.4082093208176684
+  },
+  {
+    "dataset": "SNR1-random-ID0",
+    "method": "random tigress",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.544389975704075,
+    "f1_score": 0.1237785016286645,
+    "mcc": 0.04785900195267925
+  },
+  {
+    "dataset": "SNR1-random-ID0",
+    "method": "random lasso",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.5,
+    "f1_score": 0,
+    "mcc": 0
+  },
+  {
+    "dataset": "SNR1-random-ID0",
+    "method": "random lsco",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.5172713004002224,
+    "f1_score": 0.11414982164090369,
+    "mcc": 0.03638938135221981
+  },
+  {
+    "dataset": "SNR1-random-ID0",
+    "method": "nestboot lasso",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.7597513891064568,
+    "f1_score": 0.3986013986013986,
+    "mcc": 0.36576730900750465
+  },
+  {
+    "dataset": "SNR1-random-ID0",
+    "method": "nestboot lsco",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.735820978041521,
+    "f1_score": 0.4015151515151515,
+    "mcc": 0.3685592149915874
+  },
+  {
+    "dataset": "SNR0.01-random-ID1",
+    "method": "tigress",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.8149073898684763,
+    "f1_score": 0.45394736842105265,
+    "mcc": 0.418415158277976
+  },
+  {
+    "dataset": "SNR0.01-random-ID1",
+    "method": "lasso",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.5578706944593145,
+    "f1_score": 0.1419656786271451,
+    "mcc": 0.1757149295673595
+  },
+  {
+    "dataset": "SNR0.01-random-ID1",
+    "method": "lsco",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.5399484995978246,
+    "f1_score": 0.13138686131386862,
+    "mcc": 0.05999789454271388
+  },
+  {
+    "dataset": "SNR0.01-random-ID1",
+    "method": "random tigress",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.5152346205688654,
+    "f1_score": 0.12653061224489795,
+    "mcc": 0.02672889903597529
+  },
+  {
+    "dataset": "SNR0.01-random-ID1",
+    "method": "random lasso",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.5,
+    "f1_score": 0.0,
+    "mcc": 0
+  },
+  {
+    "dataset": "SNR0.01-random-ID1",
+    "method": "random lsco",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.5391125788908746,
+    "f1_score": 0.1377672209026128,
+    "mcc": 0.06905445026677466
+  },
+  {
+    "dataset": "SNR0.01-random-ID1",
+    "method": "nestboot lasso",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.5333476084981154,
+    "f1_score": 0.13179571663920922,
+    "mcc": 0.03952507244372119
+  },
+  {
+    "dataset": "SNR0.01-random-ID1",
+    "method": "nestboot lsco",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.5712454257705157,
+    "f1_score": 0.14792899408284024,
+    "mcc": 0.06678830318993631
+  },
+  {
+    "dataset": "SNR0.1-random-ID1",
+    "method": "tigress",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.7849899387540527,
+    "f1_score": 0.43853820598006643,
+    "mcc": 0.4026452973944125
+  },
+  {
+    "dataset": "SNR0.1-random-ID1",
+    "method": "lasso",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.5234277415865748,
+    "f1_score": 0.09142857142857143,
+    "mcc": 0.15578856299534533
+  },
+  {
+    "dataset": "SNR0.1-random-ID1",
+    "method": "lsco",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.6513332180339254,
+    "f1_score": 0.20583717357910905,
+    "mcc": 0.14504553879848925
+  },
+  {
+    "dataset": "SNR0.1-random-ID1",
+    "method": "random tigress",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.5377907535365348,
+    "f1_score": 0.13220815752461323,
+    "mcc": 0.03989638360008022
+  },
+  {
+    "dataset": "SNR0.1-random-ID1",
+    "method": "random lasso",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.5,
+    "f1_score": 0,
+    "mcc": 0
+  },
+  {
+    "dataset": "SNR0.1-random-ID1",
+    "method": "random lsco",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.5171439238584672,
+    "f1_score": 0.12373540856031129,
+    "mcc": 0.05392273445057609
+  },
+  {
+    "dataset": "SNR0.1-random-ID1",
+    "method": "nestboot lasso",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.6106956672129663,
+    "f1_score": 0.17716535433070865,
+    "mcc": 0.10721110143649674
+  },
+  {
+    "dataset": "SNR0.1-random-ID1",
+    "method": "nestboot lsco",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.6619627253485749,
+    "f1_score": 0.21212121212121213,
+    "mcc": 0.15399290598881618
+  },
+  {
+    "dataset": "SNR1-random-ID1",
+    "method": "tigress",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.8040170862741546,
+    "f1_score": 0.44808743169398907,
+    "mcc": 0.40847431959336444
+  },
+  {
+    "dataset": "SNR1-random-ID1",
+    "method": "lasso",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.5211588139534246,
+    "f1_score": 0.08284023668639054,
+    "mcc": 0.17214789443392442
+  },
+  {
+    "dataset": "SNR1-random-ID1",
+    "method": "lsco",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.7902319439754686,
+    "f1_score": 0.45925925925925926,
+    "mcc": 0.4785046437565227
+  },
+  {
+    "dataset": "SNR1-random-ID1",
+    "method": "random tigress",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.5239534519819145,
+    "f1_score": 0.12523481527864747,
+    "mcc": 0.027345674789128065
+  },
+  {
+    "dataset": "SNR1-random-ID1",
+    "method": "random lasso",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.5,
+    "f1_score": 0,
+    "mcc": 0
+  },
+  {
+    "dataset": "SNR1-random-ID1",
+    "method": "random lsco",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.5196118802313675,
+    "f1_score": 0.12219156484036263,
+    "mcc": 0.07670427861786906
+  },
+  {
+    "dataset": "SNR1-random-ID1",
+    "method": "nestboot lasso",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.7783588501903813,
+    "f1_score": 0.45985401459854014,
+    "mcc": 0.43578390883166435
+  },
+  {
+    "dataset": "SNR1-random-ID1",
+    "method": "nestboot lsco",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.7831794635283267,
+    "f1_score": 0.43478260869565216,
+    "mcc": 0.3950687454676579
+  },
+  {
+    "dataset": "SNR0.01-random-ID2",
+    "method": "tigress",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.7733215065502184,
+    "f1_score": 0.4251497005988024,
+    "mcc": 0.3851284257881614
+  },
+  {
+    "dataset": "SNR0.01-random-ID2",
+    "method": "lasso",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.528717248908297,
+    "f1_score": 0.13210445468509985,
+    "mcc": 0.08522498330301513
+  },
+  {
+    "dataset": "SNR0.01-random-ID2",
+    "method": "lsco",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.5079667030567685,
+    "f1_score": 0.12371134020618557,
+    "mcc": 0.030230311366857464
+  },
+  {
+    "dataset": "SNR0.01-random-ID2",
+    "method": "random tigress",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.5628752729257641,
+    "f1_score": 0.13720642768850433,
+    "mcc": 0.06129774192452909
+  },
+  {
+    "dataset": "SNR0.01-random-ID2",
+    "method": "random lasso",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.5007191593886463,
+    "f1_score": 0.03418803418803419,
+    "mcc": 0.050289945662418456
+  },
+  {
+    "dataset": "SNR0.01-random-ID2",
+    "method": "random lsco",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.5150491266375545,
+    "f1_score": 0.1265934065934066,
+    "mcc": 0.030144488776030664
+  },
+  {
+    "dataset": "SNR0.01-random-ID2",
+    "method": "nestboot lasso",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.49978165938864627,
+    "f1_score": 0.0,
+    "mcc": -0.005341310900599889
+  },
+  {
+    "dataset": "SNR0.01-random-ID2",
+    "method": "nestboot lsco",
+    "snr": 0.01,
+    "topology": "random",
+    "auroc": 0.514267194323144,
+    "f1_score": 0.12258064516129032,
+    "mcc": 0.03798489074817643
+  },
+  {
+    "dataset": "SNR0.1-random-ID2",
+    "method": "tigress",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.812115174672489,
+    "f1_score": 0.4378698224852071,
+    "mcc": 0.3969979810770708
+  },
+  {
+    "dataset": "SNR0.1-random-ID2",
+    "method": "lasso",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.513924672489083,
+    "f1_score": 0.09302325581395349,
+    "mcc": 0.07870449935194629
+  },
+  {
+    "dataset": "SNR0.1-random-ID2",
+    "method": "lsco",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.5717767467248908,
+    "f1_score": 0.17204301075268819,
+    "mcc": 0.1105137154184477
+  },
+  {
+    "dataset": "SNR0.1-random-ID2",
+    "method": "random tigress",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.5536913209606987,
+    "f1_score": 0.15195071868583163,
+    "mcc": 0.07860654655475612
+  },
+  {
+    "dataset": "SNR0.1-random-ID2",
+    "method": "random lasso",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.5,
+    "f1_score": 0,
+    "mcc": 0
+  },
+  {
+    "dataset": "SNR0.1-random-ID2",
+    "method": "random lsco",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.533438864628821,
+    "f1_score": 0.13066871637202152,
+    "mcc": 0.038827532482704284
+  },
+  {
+    "dataset": "SNR0.1-random-ID2",
+    "method": "nestboot lasso",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.5819855349344978,
+    "f1_score": 0.15495495495495495,
+    "mcc": 0.07728859020357508
+  },
+  {
+    "dataset": "SNR0.1-random-ID2",
+    "method": "nestboot lsco",
+    "snr": 0.1,
+    "topology": "random",
+    "auroc": 0.5761694868995633,
+    "f1_score": 0.1641025641025641,
+    "mcc": 0.09617787844611768
+  },
+  {
+    "dataset": "SNR1-random-ID2",
+    "method": "tigress",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.7873553493449782,
+    "f1_score": 0.455,
+    "mcc": 0.41863405977430385
+  },
+  {
+    "dataset": "SNR1-random-ID2",
+    "method": "lasso",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.5085862445414847,
+    "f1_score": 0.047337278106508875,
+    "mcc": 0.09318014898716676
+  },
+  {
+    "dataset": "SNR1-random-ID2",
+    "method": "lsco",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.7411258187772926,
+    "f1_score": 0.36482084690553745,
+    "mcc": 0.3575284843548193
+  },
+  {
+    "dataset": "SNR1-random-ID2",
+    "method": "random tigress",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.5392985807860262,
+    "f1_score": 0.1310344827586207,
+    "mcc": 0.04437653027194744
+  },
+  {
+    "dataset": "SNR1-random-ID2",
+    "method": "random lasso",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.5,
+    "f1_score": 0,
+    "mcc": 0
+  },
+  {
+    "dataset": "SNR1-random-ID2",
+    "method": "random lsco",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.54055403930131,
+    "f1_score": 0.1353135313531353,
+    "mcc": 0.044382513297114214
+  },
+  {
+    "dataset": "SNR1-random-ID2",
+    "method": "nestboot lasso",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.7414806222707423,
+    "f1_score": 0.3488372093023256,
+    "mcc": 0.3254197896306562
+  },
+  {
+    "dataset": "SNR1-random-ID2",
+    "method": "nestboot lsco",
+    "snr": 1.0,
+    "topology": "random",
+    "auroc": 0.7048321506550218,
+    "f1_score": 0.3508771929824561,
+    "mcc": 0.3141084702746438
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID0",
+    "method": "tigress",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.8398566666666666,
+    "f1_score": 0.5581395348837209,
+    "mcc": 0.5374749737051779
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID0",
+    "method": "lasso",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.55452,
+    "f1_score": 0.17118093174431204,
+    "mcc": 0.2244549029026561
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID0",
+    "method": "lsco",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.5304711111111111,
+    "f1_score": 0.15965583173996176,
+    "mcc": 0.044612976309268686
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID0",
+    "method": "random tigress",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.5035799999999999,
+    "f1_score": 0.14848236259228875,
+    "mcc": 0.0757081498242366
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID0",
+    "method": "random lasso",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.5045577777777778,
+    "f1_score": 0.0196078431372549,
+    "mcc": 0.06777692615535916
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID0",
+    "method": "random lsco",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.53176,
+    "f1_score": 0.15894039735099338,
+    "mcc": 0.04213250442347432
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID0",
+    "method": "nestboot lasso",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.5285355555555555,
+    "f1_score": 0.156794425087108,
+    "mcc": 0.03992323502877045
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID0",
+    "method": "nestboot lsco",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.5383144444444445,
+    "f1_score": 0.15906288532675708,
+    "mcc": 0.04388115209770237
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID0",
+    "method": "tigress",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.8286155555555555,
+    "f1_score": 0.5907859078590786,
+    "mcc": 0.5632993479589641
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID0",
+    "method": "lasso",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.5314122222222222,
+    "f1_score": 0.12037037037037036,
+    "mcc": 0.2164203480500927
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID0",
+    "method": "lsco",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.5514044444444444,
+    "f1_score": 0.16957605985037408,
+    "mcc": 0.07524269476838645
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID0",
+    "method": "random tigress",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.4962233333333333,
+    "f1_score": 0.14979423868312758,
+    "mcc": 0.023500936593040637
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID0",
+    "method": "random lasso",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.5,
+    "f1_score": 0,
+    "mcc": 0
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID0",
+    "method": "random lsco",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.5162577777777778,
+    "f1_score": 0.15183673469387754,
+    "mcc": 0.03218754543918732
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID0",
+    "method": "nestboot lasso",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.5537877777777778,
+    "f1_score": 0.16486261448792672,
+    "mcc": 0.052419868398490534
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID0",
+    "method": "nestboot lsco",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.5484433333333334,
+    "f1_score": 0.16905444126074498,
+    "mcc": 0.0761703764578472
+  },
+  {
+    "dataset": "SNR1-smallworld-ID0",
+    "method": "tigress",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.8581377777777777,
+    "f1_score": 0.5578231292517006,
+    "mcc": 0.5338525060911001
+  },
+  {
+    "dataset": "SNR1-smallworld-ID0",
+    "method": "lasso",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.5122722222222221,
+    "f1_score": 0.04854368932038835,
+    "mcc": 0.1360284643183438
+  },
+  {
+    "dataset": "SNR1-smallworld-ID0",
+    "method": "lsco",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.7761722222222223,
+    "f1_score": 0.4213075060532688,
+    "mcc": 0.4212056470001851
+  },
+  {
+    "dataset": "SNR1-smallworld-ID0",
+    "method": "random tigress",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.4997000000000001,
+    "f1_score": 0.15110356536502548,
+    "mcc": 0.00917469804271967
+  },
+  {
+    "dataset": "SNR1-smallworld-ID0",
+    "method": "random lasso",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.5,
+    "f1_score": 0,
+    "mcc": 0
+  },
+  {
+    "dataset": "SNR1-smallworld-ID0",
+    "method": "random lsco",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.5170444444444445,
+    "f1_score": 0.15541090317331163,
+    "mcc": 0.037016803791211306
+  },
+  {
+    "dataset": "SNR1-smallworld-ID0",
+    "method": "nestboot lasso",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.7944022222222222,
+    "f1_score": 0.49865951742627346,
+    "mcc": 0.45899576538525144
+  },
+  {
+    "dataset": "SNR1-smallworld-ID0",
+    "method": "nestboot lsco",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.7569833333333333,
+    "f1_score": 0.4155844155844156,
+    "mcc": 0.36616000053757347
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID1",
+    "method": "tigress",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.8216988888888889,
+    "f1_score": 0.5459940652818991,
+    "mcc": 0.5243373965997775
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID1",
+    "method": "lasso",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.5439166666666667,
+    "f1_score": 0.16532258064516128,
+    "mcc": 0.19260987222333698
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID1",
+    "method": "lsco",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.5177933333333333,
+    "f1_score": 0.1523046092184369,
+    "mcc": 0.05046145452850707
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID1",
+    "method": "random tigress",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.49674555555555555,
+    "f1_score": 0.15303215303215303,
+    "mcc": 0.05942959860068127
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID1",
+    "method": "random lasso",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.5012288888888888,
+    "f1_score": 0.018433179723502304,
+    "mcc": 0.06777692615535916
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID1",
+    "method": "random lsco",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.5308688888888888,
+    "f1_score": 0.15861344537815125,
+    "mcc": 0.0664347471166164
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID1",
+    "method": "nestboot lasso",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.5141255555555555,
+    "f1_score": 0.11363636363636363,
+    "mcc": 0.030572015512029573
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID1",
+    "method": "nestboot lsco",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.5269044444444444,
+    "f1_score": 0.136986301369863,
+    "mcc": 0.04304265655679602
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID1",
+    "method": "tigress",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.8068477777777777,
+    "f1_score": 0.5632183908045977,
+    "mcc": 0.5416763085078514
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID1",
+    "method": "lasso",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.5218322222222221,
+    "f1_score": 0.08490566037735849,
+    "mcc": 0.17125719408093082
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID1",
+    "method": "lsco",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.5920855555555555,
+    "f1_score": 0.21105527638190955,
+    "mcc": 0.17125719408093082
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID1",
+    "method": "random tigress",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.5164733333333335,
+    "f1_score": 0.15288741171582884,
+    "mcc": 0.03754678176622845
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID1",
+    "method": "random lasso",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.5,
+    "f1_score": 0,
+    "mcc": 0
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID1",
+    "method": "random lsco",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.5098077777777777,
+    "f1_score": 0.15287958115183245,
+    "mcc": 0.04367439519825304
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID1",
+    "method": "nestboot lasso",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.6053666666666667,
+    "f1_score": 0.2318840579710145,
+    "mcc": 0.15305295922279813
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID1",
+    "method": "nestboot lsco",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.5943022222222223,
+    "f1_score": 0.19666048237476808,
+    "mcc": 0.13600886585626626
+  },
+  {
+    "dataset": "SNR1-smallworld-ID1",
+    "method": "tigress",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.8691722222222222,
+    "f1_score": 0.5840220385674931,
+    "mcc": 0.554477583125664
+  },
+  {
+    "dataset": "SNR1-smallworld-ID1",
+    "method": "lasso",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.5193533333333333,
+    "f1_score": 0.07582938388625593,
+    "mcc": 0.17954096195592056
+  },
+  {
+    "dataset": "SNR1-smallworld-ID1",
+    "method": "lsco",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.7572066666666667,
+    "f1_score": 0.46794871794871795,
+    "mcc": 0.46813893803860357
+  },
+  {
+    "dataset": "SNR1-smallworld-ID1",
+    "method": "random tigress",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.5570522222222222,
+    "f1_score": 0.1679160419790105,
+    "mcc": 0.06848146154570113
+  },
+  {
+    "dataset": "SNR1-smallworld-ID1",
+    "method": "random lasso",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.5,
+    "f1_score": 0,
+    "mcc": 0
+  },
+  {
+    "dataset": "SNR1-smallworld-ID1",
+    "method": "random lsco",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.5205655555555556,
+    "f1_score": 0.15514592933947774,
+    "mcc": 0.05813485472743485
+  },
+  {
+    "dataset": "SNR1-smallworld-ID1",
+    "method": "nestboot lasso",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.7653933333333334,
+    "f1_score": 0.4412470023980815,
+    "mcc": 0.4123433473211465
+  },
+  {
+    "dataset": "SNR1-smallworld-ID1",
+    "method": "nestboot lsco",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.7450022222222222,
+    "f1_score": 0.44984802431610943,
+    "mcc": 0.44973890467737226
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID2",
+    "method": "tigress",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.7945088888888889,
+    "f1_score": 0.5775075987841946,
+    "mcc": 0.5638021769982068
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID2",
+    "method": "lasso",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.5216066666666667,
+    "f1_score": 0.08450704225352113,
+    "mcc": 0.16289730826330825
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID2",
+    "method": "lsco",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.5094511111111111,
+    "f1_score": 0.14924181963288108,
+    "mcc": 0.05313323012037635
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID2",
+    "method": "random tigress",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.5222600000000001,
+    "f1_score": 0.15704154002026344,
+    "mcc": 0.03396363284079196
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID2",
+    "method": "random lasso",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.5,
+    "f1_score": 0,
+    "mcc": 0
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID2",
+    "method": "random lsco",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.5003777777777778,
+    "f1_score": 0.15317667536988686,
+    "mcc": 0.020746171862910095
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID2",
+    "method": "nestboot lasso",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.5220400000000001,
+    "f1_score": 0.14991181657848324,
+    "mcc": 0.03671962816697677
+  },
+  {
+    "dataset": "SNR0.01-smallworld-ID2",
+    "method": "nestboot lsco",
+    "snr": 0.01,
+    "topology": "smallworld",
+    "auroc": 0.5013944444444444,
+    "f1_score": 0.009950248756218905,
+    "mcc": 0.06777692615535916
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID2",
+    "method": "tigress",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.7989799999999999,
+    "f1_score": 0.5444743935309974,
+    "mcc": 0.5092283397572253
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID2",
+    "method": "lasso",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.5070599999999998,
+    "f1_score": 0.029411764705882353,
+    "mcc": 0.09871356148402029
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID2",
+    "method": "lsco",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.5636111111111112,
+    "f1_score": 0.1884297520661157,
+    "mcc": 0.11961560037443429
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID2",
+    "method": "random tigress",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.49268,
+    "f1_score": 0.15335717123559794,
+    "mcc": 0.025376791662781166
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID2",
+    "method": "random lasso",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.5,
+    "f1_score": 0,
+    "mcc": 0
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID2",
+    "method": "random lsco",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.5023466666666666,
+    "f1_score": 0.1555004135649297,
+    "mcc": 0.03937496154790789
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID2",
+    "method": "nestboot lasso",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.5722355555555556,
+    "f1_score": 0.17295597484276728,
+    "mcc": 0.09570079830067255
+  },
+  {
+    "dataset": "SNR0.1-smallworld-ID2",
+    "method": "nestboot lsco",
+    "snr": 0.1,
+    "topology": "smallworld",
+    "auroc": 0.5624611111111112,
+    "f1_score": 0.19,
+    "mcc": 0.118
+  },
+  {
+    "dataset": "SNR1-smallworld-ID2",
+    "method": "tigress",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.8523511111111112,
+    "f1_score": 0.543640897755611,
+    "mcc": 0.5160091884912477
+  },
+  {
+    "dataset": "SNR1-smallworld-ID2",
+    "method": "lasso",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.5022766666666666,
+    "f1_score": 0.009900990099009901,
+    "mcc": 0.04367439519825304
+  },
+  {
+    "dataset": "SNR1-smallworld-ID2",
+    "method": "lsco",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.7904533333333333,
+    "f1_score": 0.49343832020997375,
+    "mcc": 0.4680640085329314
+  },
+  {
+    "dataset": "SNR1-smallworld-ID2",
+    "method": "random tigress",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.47178000000000003,
+    "f1_score": 0.1498751040799334,
+    "mcc": 0.0012103486657359984
+  },
+  {
+    "dataset": "SNR1-smallworld-ID2",
+    "method": "random lasso",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.5,
+    "f1_score": 0,
+    "mcc": 0
+  },
+  {
+    "dataset": "SNR1-smallworld-ID2",
+    "method": "random lsco",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.5218344444444444,
+    "f1_score": 0.15567765567765568,
+    "mcc": 0.03774608597070211
+  },
+  {
+    "dataset": "SNR1-smallworld-ID2",
+    "method": "nestboot lasso",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.78912,
+    "f1_score": 0.47696476964769646,
+    "mcc": 0.44477061000294077
+  },
+  {
+    "dataset": "SNR1-smallworld-ID2",
+    "method": "nestboot lsco",
+    "snr": 1.0,
+    "topology": "smallworld",
+    "auroc": 0.7844077777777778,
+    "f1_score": 0.4534005037783375,
+    "mcc": 0.41166429421058554
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID0",
+    "method": "tigress",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.8300291666666666,
+    "f1_score": 0.47692307692307695,
+    "mcc": 0.47700288830369814
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID0",
+    "method": "lasso",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.6097166666666667,
+    "f1_score": 0.16666666666666666,
+    "mcc": 0.24258517772354662
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID0",
+    "method": "lsco",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.5478916666666667,
+    "f1_score": 0.07894736842105263,
+    "mcc": 0.06956836071246529
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID0",
+    "method": "random tigress",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.6586375,
+    "f1_score": 0.08333333333333333,
+    "mcc": 0.07291147894741143
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID0",
+    "method": "random lasso",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.5159083333333334,
+    "f1_score": 0.06557377049180328,
+    "mcc": 0.07749248732835516
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID0",
+    "method": "random lsco",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.5102125000000001,
+    "f1_score": 0.047619047619047616,
+    "mcc": 0.024126291822583114
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID0",
+    "method": "nestboot lasso",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.5178083333333333,
+    "f1_score": 0.06666666666666667,
+    "mcc": 0.04974216022106212
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID0",
+    "method": "nestboot lsco",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.5839916666666667,
+    "f1_score": 0.09230769230769231,
+    "mcc": 0.09969151597447763
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID0",
+    "method": "tigress",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.833675,
+    "f1_score": 0.4489795918367347,
+    "mcc": 0.4397008597591489
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID0",
+    "method": "lasso",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.5850833333333333,
+    "f1_score": 0.21333333333333335,
+    "mcc": 0.24258517772354662
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID0",
+    "method": "lsco",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.6288416666666666,
+    "f1_score": 0.1346153846153846,
+    "mcc": 0.11596767155129822
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID0",
+    "method": "random tigress",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.6233333333333333,
+    "f1_score": 0.06936416184971098,
+    "mcc": 0.06774772645506426
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID0",
+    "method": "random lasso",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.5,
+    "f1_score": 0,
+    "mcc": 0
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID0",
+    "method": "random lsco",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.5577208333333333,
+    "f1_score": 0.0736196319018405,
+    "mcc": 0.05120915564991892
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID0",
+    "method": "nestboot lasso",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.5833541666666666,
+    "f1_score": 0.06557377049180328,
+    "mcc": 0.05602724243623092
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID0",
+    "method": "nestboot lsco",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.6601250000000001,
+    "f1_score": 0.1276595744680851,
+    "mcc": 0.11090349693260307
+  },
+  {
+    "dataset": "SNR1-scalefree-ID0",
+    "method": "tigress",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.8585333333333334,
+    "f1_score": 0.4631578947368421,
+    "mcc": 0.45322713722242836
+  },
+  {
+    "dataset": "SNR1-scalefree-ID0",
+    "method": "lasso",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.5475416666666667,
+    "f1_score": 0.15384615384615385,
+    "mcc": 0.24258517772354662
+  },
+  {
+    "dataset": "SNR1-scalefree-ID0",
+    "method": "lsco",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.812125,
+    "f1_score": 0.48,
+    "mcc": 0.5023822971687906
+  },
+  {
+    "dataset": "SNR1-scalefree-ID0",
+    "method": "random tigress",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.6996708333333334,
+    "f1_score": 0.08816705336426914,
+    "mcc": 0.09123464071437287
+  },
+  {
+    "dataset": "SNR1-scalefree-ID0",
+    "method": "random lasso",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.5,
+    "f1_score": 0.0,
+    "mcc": 0
+  },
+  {
+    "dataset": "SNR1-scalefree-ID0",
+    "method": "random lsco",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.5,
+    "f1_score": 0.04215851602023609,
+    "mcc": 0.03388857118502326
+  },
+  {
+    "dataset": "SNR1-scalefree-ID0",
+    "method": "nestboot lasso",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.8353958333333332,
+    "f1_score": 0.36893203883495146,
+    "mcc": 0.35555103352865197
+  },
+  {
+    "dataset": "SNR1-scalefree-ID0",
+    "method": "nestboot lsco",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.8036708333333333,
+    "f1_score": 0.2773722627737226,
+    "mcc": 0.26867690745853523
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID1",
+    "method": "tigress",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.8307458333333334,
+    "f1_score": 0.34710743801652894,
+    "mcc": 0.37615469818433384
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID1",
+    "method": "lasso",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.5526833333333334,
+    "f1_score": 0.14925373134328357,
+    "mcc": 0.16181497600116554
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID1",
+    "method": "lsco",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.6168416666666666,
+    "f1_score": 0.1103448275862069,
+    "mcc": 0.09063137570484184
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID1",
+    "method": "random tigress",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.6643874999999999,
+    "f1_score": 0.08823529411764706,
+    "mcc": 0.12140536974813337
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID1",
+    "method": "random lasso",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.5,
+    "f1_score": 0.0,
+    "mcc": 0
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID1",
+    "method": "random lsco",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.5035541666666667,
+    "f1_score": 0.05517241379310345,
+    "mcc": 0.030820770862589313
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID1",
+    "method": "nestboot lasso",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.5777208333333332,
+    "f1_score": 0.06741573033707865,
+    "mcc": 0.046446519048203704
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID1",
+    "method": "nestboot lsco",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.6165333333333333,
+    "f1_score": 0.09,
+    "mcc": 0.07150934873512511
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID1",
+    "method": "tigress",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.8239416666666667,
+    "f1_score": 0.38333333333333336,
+    "mcc": 0.3737806974736945
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID1",
+    "method": "lasso",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.5337,
+    "f1_score": 0.11594202898550725,
+    "mcc": 0.1399994166703125
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID1",
+    "method": "lsco",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.5603166666666667,
+    "f1_score": 0.0851063829787234,
+    "mcc": 0.07163159406928954
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID1",
+    "method": "random tigress",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.7001833333333334,
+    "f1_score": 0.1340782122905028,
+    "mcc": 0.1274149939975963
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID1",
+    "method": "random lasso",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.5,
+    "f1_score": 0.0,
+    "mcc": 0
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID1",
+    "method": "random lsco",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.5681666666666667,
+    "f1_score": 0.055944055944055944,
+    "mcc": 0.03933788618173027
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID1",
+    "method": "nestboot lasso",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.5183708333333332,
+    "f1_score": 0.04790419161676647,
+    "mcc": 0.023253667253425658
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID1",
+    "method": "nestboot lsco",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.5872416666666667,
+    "f1_score": 0.07514450867052024,
+    "mcc": 0.061640344219653836
+  },
+  {
+    "dataset": "SNR1-scalefree-ID1",
+    "method": "tigress",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.8641125,
+    "f1_score": 0.3939393939393939,
+    "mcc": 0.39044319819016465
+  },
+  {
+    "dataset": "SNR1-scalefree-ID1",
+    "method": "lasso",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.517775,
+    "f1_score": 0.07142857142857142,
+    "mcc": 0.1399994166703125
+  },
+  {
+    "dataset": "SNR1-scalefree-ID1",
+    "method": "lsco",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.8951291666666666,
+    "f1_score": 0.4634146341463415,
+    "mcc": 0.49004267934689577
+  },
+  {
+    "dataset": "SNR1-scalefree-ID1",
+    "method": "random tigress",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.6749208333333332,
+    "f1_score": 0.07046070460704607,
+    "mcc": 0.08506667455326442
+  },
+  {
+    "dataset": "SNR1-scalefree-ID1",
+    "method": "random lasso",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.5,
+    "f1_score": 0.0,
+    "mcc": 0
+  },
+  {
+    "dataset": "SNR1-scalefree-ID1",
+    "method": "random lsco",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.5673958333333333,
+    "f1_score": 0.06666666666666667,
+    "mcc": 0.049264768193785495
+  },
+  {
+    "dataset": "SNR1-scalefree-ID1",
+    "method": "nestboot lasso",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.8221333333333333,
+    "f1_score": 0.3181818181818182,
+    "mcc": 0.31019270862926673
+  },
+  {
+    "dataset": "SNR1-scalefree-ID1",
+    "method": "nestboot lsco",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.8934833333333333,
+    "f1_score": 0.44036697247706424,
+    "mcc": 0.4292563817663335
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID2",
+    "method": "tigress",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.796225,
+    "f1_score": 0.34328358208955223,
+    "mcc": 0.3376888153743448
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID2",
+    "method": "lasso",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.5881833333333334,
+    "f1_score": 0.17391304347826086,
+    "mcc": 0.1846897507731401
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID2",
+    "method": "lsco",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.5817333333333333,
+    "f1_score": 0.07604562737642585,
+    "mcc": 0.05792104071812767
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID2",
+    "method": "random tigress",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.6887958333333334,
+    "f1_score": 0.0936768149882904,
+    "mcc": 0.0984524135538151
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID2",
+    "method": "random lasso",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.5122333333333333,
+    "f1_score": 0.06896551724137931,
+    "mcc": 0.05748689936883513
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID2",
+    "method": "random lsco",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.524025,
+    "f1_score": 0.05,
+    "mcc": 0.03642671297021608
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID2",
+    "method": "nestboot lasso",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.5639041666666667,
+    "f1_score": 0.05249343832020997,
+    "mcc": 0.05334287046866554
+  },
+  {
+    "dataset": "SNR0.01-scalefree-ID2",
+    "method": "nestboot lsco",
+    "snr": 0.01,
+    "topology": "scalefree",
+    "auroc": 0.6471,
+    "f1_score": 0.09523809523809523,
+    "mcc": 0.08407511905203008
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID2",
+    "method": "tigress",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.7938708333333333,
+    "f1_score": 0.3620689655172414,
+    "mcc": 0.3504132948340591
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID2",
+    "method": "lasso",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.570625,
+    "f1_score": 0.19718309859154928,
+    "mcc": 0.22646795387753832
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID2",
+    "method": "lsco",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.6136250000000001,
+    "f1_score": 0.13725490196078433,
+    "mcc": 0.11894497766427341
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID2",
+    "method": "random tigress",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.6701083333333334,
+    "f1_score": 0.0782608695652174,
+    "mcc": 0.08916259417562501
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID2",
+    "method": "random lasso",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.5,
+    "f1_score": 0.0,
+    "mcc": 0
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID2",
+    "method": "random lsco",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.5,
+    "f1_score": 0.04236540158870256,
+    "mcc": 0.02725997686672182
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID2",
+    "method": "nestboot lasso",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.573775,
+    "f1_score": 0.0851063829787234,
+    "mcc": 0.06800788257223944
+  },
+  {
+    "dataset": "SNR0.1-scalefree-ID2",
+    "method": "nestboot lsco",
+    "snr": 0.1,
+    "topology": "scalefree",
+    "auroc": 0.6590041666666666,
+    "f1_score": 0.11956521739130435,
+    "mcc": 0.1049331542582148
+  },
+  {
+    "dataset": "SNR1-scalefree-ID2",
+    "method": "tigress",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.7444250000000001,
+    "f1_score": 0.3968253968253968,
+    "mcc": 0.3908869448607699
+  },
+  {
+    "dataset": "SNR1-scalefree-ID2",
+    "method": "lasso",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.5231916666666667,
+    "f1_score": 0.09523809523809523,
+    "mcc": 0.10866376261457374
+  },
+  {
+    "dataset": "SNR1-scalefree-ID2",
+    "method": "lsco",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.8416416666666666,
+    "f1_score": 0.4935064935064935,
+    "mcc": 0.5189338561918516
+  },
+  {
+    "dataset": "SNR1-scalefree-ID2",
+    "method": "random tigress",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.5956625,
+    "f1_score": 0.08391608391608392,
+    "mcc": 0.06253573828999363
+  },
+  {
+    "dataset": "SNR1-scalefree-ID2",
+    "method": "random lasso",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.5,
+    "f1_score": 0.0,
+    "mcc": 0
+  },
+  {
+    "dataset": "SNR1-scalefree-ID2",
+    "method": "random lsco",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.5490208333333333,
+    "f1_score": 0.04933051444679352,
+    "mcc": 0.041305743701688546
+  },
+  {
+    "dataset": "SNR1-scalefree-ID2",
+    "method": "nestboot lasso",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.8051166666666667,
+    "f1_score": 0.2518518518518518,
+    "mcc": 0.24079970125403188
+  },
+  {
+    "dataset": "SNR1-scalefree-ID2",
+    "method": "nestboot lsco",
+    "snr": 1.0,
+    "topology": "scalefree",
+    "auroc": 0.8460541666666667,
+    "f1_score": 0.41304347826086957,
+    "mcc": 0.4034858006716832
+  }
+]

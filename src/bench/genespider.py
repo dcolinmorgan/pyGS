@@ -18,6 +18,7 @@ import time
 import warnings
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import requests
@@ -48,11 +49,17 @@ TIERS: dict[str, list[str]] = {
         "transfer_entropy", "pcmci",
     ],
     "slow": ["tigress", "glasso_stars", "pc", "fci"],
+    "very_slow": ["notears", "dag_gnn"],
     "scenicplus": ["scenicplus"],
 }
 
 # Methods handled by pyGS directly (not sparselink)
 PYGS_METHODS: set[str] = {"scenicplus", "panda"}
+
+# Scored directly but never wrapped in NestBoot, with the reason shown in the TUI
+NESTBOOT_EXCLUDED: dict[str, str] = {
+    "tigress": "already bootstrapped (stability selection)",
+}
 
 CACHE_DIR = Path(".gs_cache")
 
@@ -117,6 +124,39 @@ def _list_datasets(size: str) -> list[dict]:
                 })
         url = resp.get("next")
     return results
+
+
+def complete_networks(
+    datasets: list[dict[str, Any]], size: str, n_networks: int
+) -> tuple[list[tuple[dict[str, Any], tuple[Any, ...]]], list[str]]:
+    """Load whole networks: every stored SNR file of each, in listing order.
+
+    A network is kept only when it has a file at each of VALID_SNRS and all of
+    them load, so every network is scored at every noise level. Returns the
+    loaded (metadata, load_dataset result) pairs and one reason per skipped
+    network. ``n_networks`` 0 keeps every complete network.
+    """
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for meta in datasets:
+        groups.setdefault(meta["network_id"], []).append(meta)
+    loaded: list[tuple[dict[str, Any], tuple[Any, ...]]] = []
+    skipped: list[str] = []
+    kept = 0
+    for network_id, metas in groups.items():
+        if n_networks and kept >= n_networks:
+            break
+        stored = sorted(meta["snr"] for meta in metas)
+        if set(stored) != VALID_SNRS:
+            skipped.append(f"ID{network_id}: stored only at filename SNR {stored}")
+            continue
+        try:
+            pairs = [(meta, load_dataset(meta, size)) for meta in sorted(metas, key=lambda m: m["snr"])]
+        except Exception as exc:
+            skipped.append(f"ID{network_id}: {str(exc)[:120]}")
+            continue
+        loaded.extend(pairs)
+        kept += 1
+    return loaded, skipped
 
 
 def _topology_by_id(size: str) -> dict[str, str]:
@@ -207,6 +247,16 @@ def _find_network(network_name: str) -> str | None:
         except Exception:
             continue
     return None
+
+
+def stored_snr_l(ds_meta: dict[str, object]) -> float | None:
+    """SNR_L recorded in a dataset file. The filename SNR is a different scale."""
+    path = str(ds_meta["path"])
+    key = path.replace("/", "_").replace(".json", "")
+    value = _fetch_json(f"{DATASET_RAW}/{path}", key)["obj_data"].get("SNR_L")
+    if value is None:
+        return None
+    return float(np.asarray(value).reshape(-1)[0])
 
 
 def load_dataset(ds_meta: dict, size: str) -> tuple[np.ndarray, np.ndarray | None, np.ndarray, str, str]:

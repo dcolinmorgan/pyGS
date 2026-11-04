@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - NestBoot tier option in the interactive `bench-gs` wizard — select "nestboot" alongside method tiers to configure outer/inner runs and FDR threshold inline
 
 ### Changed
+- Interactive items 4 (synthetic benchmark), 5 (GeneSpider benchmark) and 10 (benchmark against GeneSPIDER true networks) are merged into item 4, "Run benchmark", which first asks for the data: new GeneSPIDER-style data at any SNR_L, stored GeneSPIDER data with the direct vs NestBoot table, stored GeneSPIDER data at SNR_L 0.01, 1 or 100 with every network saved, or sparselink synthetic data. Evaluate, plot, dashboard and show are now items 5-8
+- Every data source in "Run benchmark" uses the same method picker: tiers fast, medium, slow and very_slow, NestBoot, TIGRESS, or method names. The default is fast + NestBoot + TIGRESS. NestBoot runs for every selected method except TIGRESS, also on generated and sparselink synthetic data
+- The direct vs NestBoot table shows direct, NestBoot and Δ for AUROC, F1 and MCC, overall and per noise level, and fits 80 columns. Every direct method is listed; TIGRESS reads "excluded". The SNR benchmark (`bench --snr`, `bench-gs --snr`) now prints this table at the end
+- The stored direct vs NestBoot run can write the boxplot when it finishes
+- `pygs show` prints the direct vs NestBoot table for results with NestBoot rows, with per-level tables labelled by SNR_L when the rows record it
+- When the methods go beyond the chapter's TIGRESS, LASSO and LSCO set, the figure is a grid of split violins (metrics down, SNR_L across), with direct and NestBoot as the two halves of each method and every run drawn as a point. TIGRESS has only the direct half
+- `bench-gs --max-networks N` (interactive default 5) scores whole networks, each at every stored SNR. A network with a missing SNR file or a file that fails to load is reported and replaced by the next one. Without `--max-networks` or `--max-datasets`, all complete networks are used. Files that fail to load are now reported instead of silently skipped
+- TIGRESS is scored directly but never wrapped in NestBoot, because it already bootstraps through stability selection. Its NestBoot column in the comparison table reads "excluded". `bench-gs --methods` now also applies without `--snr`
+- `bench-gs` rows record the stored SNR_L as `snr_l`, and `plot_snr_comparison.py` uses it for the SNR panels, so `pygs bench-gs --plot -o <json>` draws the boxplot from a NestBoot benchmark run
+- The SNR benchmark on stored GeneSPIDER files moved from `bench --snr` to `bench-gs --snr`. A requested SNR with no stored file stops the run before any inference
+- `bench --snr` generates new stable networks, knockdown designs and expression from `--n-nodes`, `--topologies`, `--sparsity`, `--n-datasets` and `--n-samples`, at any positive SNR_L. `bench` no longer takes `--sizes`
 - Direct baseline in `bench-gs` now averages absolute adjacency matrices across the alpha sweep (bagging over regularization strengths) instead of selecting a single alpha by bootstrap stability
 
 ## [1.0.0] - 2026-04-11
