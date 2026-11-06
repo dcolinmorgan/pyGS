@@ -7,6 +7,10 @@
 * ``out_support.npz`` — zeta grid, support, gene names, knockdown flags
 
 Row ``i``, column ``j`` is the link regulator ``j`` → target ``i``.
+
+``pygs nestboot --edges edges.tsv nodes.tsv`` writes the tables at the end of
+a run; ``pygs plot out.npy --zeta Z -o edges.tsv`` writes them for one
+sparsity of a finished run.
 """
 
 from __future__ import annotations
@@ -96,3 +100,39 @@ def nestboot_tables(
         "links": len(edges),
     }
     return edges, nodes, info
+
+
+def nestboot_tables_all(run: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Edges and nodes of the full FDR network at every FDR-controlled sparsity.
+
+    One block of rows per sparsity, marked by ``zeta`` and ``support_cutoff``
+    columns. Sparsities where no support cutoff meets the FDR are left out.
+    """
+    support = np.load(Path(run).with_name(Path(run).stem + "_support.npz"))
+    edge_blocks, node_blocks = [], []
+    for zeta, reached in zip(support["zetavec"], support["fdr_reached"]):
+        if not reached:
+            continue
+        edges, nodes, info = nestboot_tables(run, float(zeta), per_gene=None)
+        for block in (edges, nodes):
+            block.insert(0, "support_cutoff", round(info["cutoff"], 4))
+            block.insert(0, "zeta", float(f"{info['zeta']:.4g}"))
+        edge_blocks.append(edges)
+        node_blocks.append(nodes)
+    if not edge_blocks:
+        return pd.DataFrame(), pd.DataFrame()
+    return pd.concat(edge_blocks, ignore_index=True), pd.concat(node_blocks, ignore_index=True)
+
+
+def write_table(frame: pd.DataFrame, path: Path) -> None:
+    """Tab-separated for ``.tsv`` and ``.txt``, comma-separated otherwise."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sep = "\t" if path.suffix.lower() in (".tsv", ".txt") else ","
+    frame.to_csv(path, sep=sep, index=False)
+
+
+def nodes_path_for(edges_path: Path) -> Path:
+    """``edges.tsv`` → ``edges_nodes.tsv``."""
+    edges_path = Path(edges_path)
+    return edges_path.with_name(edges_path.stem + "_nodes" + edges_path.suffix)

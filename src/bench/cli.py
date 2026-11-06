@@ -710,7 +710,9 @@ def _replot_snr_figure(args: argparse.Namespace) -> None:
             "Run the benchmark first, then redraw with the same -o path."
         )
         raise SystemExit(1)
-    figure = output.with_suffix(".png")
+    from bench.snr_benchmark import output_paths
+
+    figure = output_paths(output)["figure"]
     _write_snr_figure(table, figure)
     console.print(f"  [{DIM}]Figure saved to {figure} from {table}[/]")
 
@@ -795,16 +797,15 @@ def _configure_snr_figure(simulate: bool = False) -> argparse.Namespace:
     )
 
 
+RUN_OPTIONS = ("snr", "methods", "tier", "nestboot", "randomize", "max_datasets", "max_networks")
+
+
 def _redraw_only(args: argparse.Namespace) -> bool:
-    """``--plot`` without ``--snr`` redraws the saved score table at ``-o``."""
-    if not getattr(args, "plot", False) or getattr(args, "snr", None):
+    """``--plot`` with no run options redraws the saved score table at ``-o``."""
+    if not getattr(args, "plot", False):
         return False
-    if getattr(args, "methods", None):
-        console.print(
-            f"  [{ORANGE}]--plot without --snr redraws a saved score table.[/] "
-            "Pass --snr to run the benchmark, or drop --methods to redraw."
-        )
-        raise SystemExit(2)
+    if any(getattr(args, name, None) for name in RUN_OPTIONS):
+        return False
     _replot_snr_figure(args)
     return True
 
@@ -813,6 +814,7 @@ def _run_benchmark_live(args: argparse.Namespace) -> None:
     """Run synthetic benchmark using sparselink methods."""
     if _redraw_only(args):
         return
+    args.tier = getattr(args, "tier", None) or "fast"
     if getattr(args, "snr", None):
         _run_snr_benchmark(args, simulate=True)
         return
@@ -997,162 +999,16 @@ def _configure_genespider() -> argparse.Namespace:
 
 
 def _run_genespider_live(args: argparse.Namespace) -> None:
-    """Run GeneSpider benchmark using sparselink methods on real data."""
+    """Benchmark on stored GeneSPIDER data, with the same runner as ``bench --snr``.
+
+    Without ``--snr`` every stored file of the chosen networks is scored at
+    its own SNR_L.
+    """
     if _redraw_only(args):
         return
-    if getattr(args, "snr", None):
-        _run_snr_benchmark(args)
-        return
+    args.tier = getattr(args, "tier", None) or "fast"
     warnings.simplefilter("ignore")
-
-    from bench.genespider import (
-        NESTBOOT_EXCLUDED,
-        _list_datasets,
-        complete_networks,
-        load_dataset,
-        run_single,
-        stored_snr_l,
-    )
-
-    # Parse tiers — "nestboot" in the tier list enables NestBoot wrapping
-    selected_tiers = [t.strip() for t in args.tier.split(",") if t.strip()]
-    use_nestboot = getattr(args, "nestboot", False) or "nestboot" in selected_tiers
-    method_tiers = [t for t in selected_tiers if t != "nestboot"]
-
-    named = [n.strip() for n in (getattr(args, "methods", None) or "").split(",") if n.strip()]
-    methods = _resolve_methods(
-        "" if named else ",".join(method_tiers),
-        named + list(getattr(args, "extra_methods", [])),
-    )
-
-    if not methods:
-        console.print(f"  [{ROSE}]No valid methods selected.[/]")
-        return
-
-    sizes = [s.strip() for s in args.sizes.split(",")]
-    nb_methods = [m for m in methods if m not in NESTBOOT_EXCLUDED] if use_nestboot else []
-    skipped = [m for m in methods if m in NESTBOOT_EXCLUDED] if use_nestboot else []
-
-    console.print(f"  [{TEAL}]Methods[/]  {', '.join(methods)}")
-    console.print(f"  [{TEAL}]Sizes[/]    {sizes}")
-    console.print(f"  [{TEAL}]Timeout[/]  {args.timeout}s")
-    if use_nestboot:
-        console.print(
-            f"  [{TEAL}]NestBoot[/] {args.nest_runs}×{args.boot_runs},"
-            f" FDR={args.fdr}, on {', '.join(nb_methods) or 'no methods'}"
-        )
-        for name in skipped:
-            console.print(
-                f"  [{DIM}]{name} is scored directly only: {NESTBOOT_EXCLUDED[name]}[/]"
-            )
-    console.print()
-
-    progress = Progress(
-        SpinnerColumn(style=TEAL),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(bar_width=30, complete_style=TEAL, finished_style=GREEN),
-        MofNCompleteColumn(),
-        TimeElapsedColumn(),
-        console=console,
-    )
-
-    results: list[dict] = []
-
-    for size in sizes:
-        console.print(f"  [{INDIGO}]Fetching {size} datasets...[/]")
-        listed = _list_datasets(size)
-        max_networks = int(getattr(args, "max_networks", 0) or 0)
-        if max_networks or not args.max_datasets:
-            loaded, skipped = complete_networks(listed, size, max_networks)
-        else:
-            loaded, skipped = [], []
-            for ds_meta in listed[: args.max_datasets]:
-                try:
-                    loaded.append((ds_meta, load_dataset(ds_meta, size)))
-                except Exception as exc:
-                    skipped.append(f"{ds_meta['path'].rsplit('/', 1)[-1]}: {str(exc)[:120]}")
-        for reason in skipped:
-            console.print(f"  [{ORANGE}]Skipped {reason}[/]")
-
-        per_dataset = len(methods) + len(nb_methods)
-        total = len(loaded) * per_dataset
-        n_networks = len({meta["network_id"] for meta, _ in loaded})
-        console.print(
-            f"  [{DIM}]{n_networks} networks, {len(loaded)} datasets × ({len(methods)} direct"
-            f"{f' + {len(nb_methods)} nestboot' if use_nestboot else ''})"
-            f" = {total} runs[/]"
-        )
-
-        with progress:
-            task = progress.add_task(f"{size}", total=total)
-            for ds_meta, (X, P, A_true, topology, net_name) in loaded:
-                snr_l = stored_snr_l(ds_meta)
-
-                for method_name in methods:
-                    snr = ds_meta["snr"]
-
-                    if use_nestboot:
-                        # Run direct WITHOUT oracle alpha (fair baseline)
-                        progress.update(
-                            task,
-                            description=f"{method_name:20s} {topology}/SNR={snr}",
-                        )
-                        r_direct = _run_direct_fair(
-                            method_name, X, P, A_true, ds_meta,
-                            topology, net_name, args.timeout,
-                        )
-                        results.append({**r_direct, "snr_l": snr_l})
-                        progress.advance(task)
-                        if method_name in NESTBOOT_EXCLUDED:
-                            continue
-
-                        # Run nestboot
-                        progress.update(
-                            task,
-                            description=f"NB:{method_name:17s} {topology}/SNR={snr}",
-                        )
-                        r_nb = _run_nestboot_on_gs(
-                            method_name,
-                            X,
-                            P,
-                            A_true,
-                            ds_meta,
-                            topology,
-                            net_name,
-                            args,
-                        )
-                        results.append({**r_nb, "snr_l": snr_l})
-                        progress.advance(task)
-                    else:
-                        progress.update(
-                            task,
-                            description=f"{method_name:20s} {topology}/SNR={snr}",
-                        )
-                        r = run_single(
-                            method_name,
-                            X,
-                            A_true,
-                            ds_meta,
-                            topology,
-                            net_name,
-                            args.timeout,
-                            P,
-                        )
-                        results.append({**asdict(r), "snr_l": snr_l})
-                        progress.advance(task)
-
-    if use_nestboot:
-        _render_comparison(results)
-    else:
-        _render_results(results, f"NestBoot Benchmark, direct only ({len(results)} runs)")
-
-    with open(args.output, "w") as f:
-        json.dump(results, f, indent=2)
-    console.print(f"\n  [{DIM}]Results saved to {args.output}[/]")
-    if getattr(args, "figure", False):
-        figure = Path(args.output).with_suffix(".png")
-        _write_snr_figure(Path(args.output), figure)
-        console.print(f"  [{DIM}]Figure saved to {figure}[/]")
+    _run_snr_benchmark(args)
 
 
 def _run_direct_fair(
@@ -1548,9 +1404,38 @@ def _support_rows(results, zetas: np.ndarray) -> list[dict[str, float]]:
     return rows
 
 
+def _nestboot_outputs(
+    output: str, nodes: str | None = None
+) -> tuple[Path, Path | None, Path | None]:
+    """Adjacency path, and edge and node table paths when ``--output`` is a table.
+
+    ``--output out.npy`` writes the arrays only. ``--output edges.tsv`` also
+    writes the tables, with the arrays beside them as edges.npy,
+    edges_signed.npy and so on. The node table is ``--nodes``, or
+    edges_nodes.tsv.
+    """
+    from bio.nestboot_tables import nodes_path_for
+
+    path = Path(output)
+    if path.suffix.lower() not in (".tsv", ".csv"):
+        if nodes:
+            raise ValueError("--nodes needs --output to be an edge table (.tsv or .csv)")
+        return path, None, None
+    return path.with_suffix(".npy"), path, Path(nodes) if nodes else nodes_path_for(path)
+
+
 def _cmd_nestboot(args: argparse.Namespace) -> None:
     """Run NestBoot FDR analysis on expression data using a sparselink method."""
     warnings.simplefilter("ignore")
+
+    try:
+        out, edges_path, nodes_path = _nestboot_outputs(args.output, getattr(args, "nodes", None))
+    except ValueError as exc:
+        console.print(f"  [{ROSE}]{exc}[/]")
+        raise SystemExit(2)
+    if edges_path is not None and not getattr(args, "zeta", None):
+        console.print(f"  [{ROSE}]Edge and node tables need --zeta, e.g. --zeta=-4:0:41[/]")
+        raise SystemExit(2)
 
     from sparselink import get_method
 
@@ -1664,7 +1549,6 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
     console.print(f"  [{DIM}]Support threshold: {results.support}[/]")
 
     # Save adjacency
-    out = Path(args.output)
     if zeta is not None:
         _save_nestboot_zeta(out, results, gene_names, zeta, matrix, ds._P, args.fdr)
         console.print(f"  [{DIM}]Adjacency saved to {out}[/]")
@@ -1682,6 +1566,31 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
     txt_out = out.with_suffix(".txt")
     nb.export_results(results, txt_out)
     console.print(f"  [{DIM}]Summary saved to {txt_out}[/]")
+
+    if edges_path is not None:
+        _write_nestboot_tables(out, edges_path, nodes_path, getattr(args, "table_zeta", None))
+
+
+def _write_nestboot_tables(
+    run: Path, edges_path: Path, nodes_path: Path, zeta: float | None
+) -> None:
+    """Edge and node tables at one sparsity, or at every FDR-controlled one."""
+    from bio.nestboot_tables import nestboot_tables, nestboot_tables_all, write_table
+
+    if zeta is None:
+        edges, nodes = nestboot_tables_all(run)
+        if edges.empty:
+            console.print(f"  [{ORANGE}]No sparsity reached FDR ≤ cutoff; tables not written.[/]")
+            return
+        described = f"{edges['zeta'].nunique()} FDR-controlled sparsities"
+    else:
+        edges, nodes, info = nestboot_tables(run, zeta, per_gene=None)
+        status = f"cutoff {info['cutoff']:.2f}" if info["fdr_reached"] else "not FDR-controlled"
+        described = f"zeta {info['zeta']:.3g}, {status}"
+    write_table(edges, edges_path)
+    write_table(nodes, nodes_path)
+    console.print(f"  [{DIM}]Edges ({len(edges)} rows, {described}) saved to {edges_path}[/]")
+    console.print(f"  [{DIM}]Nodes saved to {nodes_path}[/]")
 
 
 # ── Evaluate ──────────────────────────────────────────────────────────────
@@ -1743,7 +1652,7 @@ def _cmd_evaluate(args: argparse.Namespace) -> None:
 
 def _cmd_plot_nestboot(args: argparse.Namespace) -> None:
     """Write edge and node tables for one zeta of a NestBoot stack."""
-    from bio.nestboot_tables import nestboot_tables
+    from bio.nestboot_tables import nestboot_tables, nodes_path_for, write_table
 
     run = Path(args.adjacency)
     per_gene = None if args.per_gene == 0 else args.per_gene
@@ -1754,16 +1663,15 @@ def _cmd_plot_nestboot(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
     suffix = "_3pergene" if per_gene else ""
-    if args.output and str(args.output).endswith(".csv"):
+    if args.output and Path(args.output).suffix.lower() in (".csv", ".tsv", ".txt"):
         edges_path = Path(args.output)
-        nodes_path = edges_path.with_name(edges_path.stem + "_nodes.csv")
+        nodes_path = nodes_path_for(edges_path)
     else:
         stem = run.with_name(f"{run.stem}_zeta{info['zeta']:.3g}{suffix}")
         edges_path = stem.with_name(stem.name + "_edges.csv")
         nodes_path = stem.with_name(stem.name + "_nodes.csv")
-    edges_path.parent.mkdir(parents=True, exist_ok=True)
-    edges.to_csv(edges_path, index=False)
-    nodes.to_csv(nodes_path, index=False)
+    write_table(edges, edges_path)
+    write_table(nodes, nodes_path)
     status = f"cutoff {info['cutoff']:.2f}" if info["fdr_reached"] else "not FDR-controlled"
     console.print(
         f"  [{GREEN}]✓[/] zeta {info['zeta']:.3g}: {info['links']} links, "
@@ -2572,7 +2480,7 @@ def main() -> None:
             "  uv run pygs bench --plot -o benchmark/plots/snr_simulated.json"
         ),
     )
-    bp.add_argument("--tier", default="fast")
+    bp.add_argument("--tier", default=None, help="Comma-separated tiers (default fast)")
     bp.add_argument("--methods", default=None, help="Comma-separated methods; overrides --tier")
     bp.add_argument(
         "--snr",
@@ -2582,14 +2490,14 @@ def main() -> None:
     bp.add_argument("--topologies", default="random,smallworld,scalefree")
     bp.add_argument("--sparsity", type=float, default=0.06, help="True-network edge density in SNR mode")
     bp.add_argument("--randomize", action="store_true", help="Also score each method on gene-wise shuffled data")
-    bp.add_argument("--nestboot", action="store_true", help="Also run NestBoot for lasso and lsco")
+    bp.add_argument("--nestboot", action="store_true", help="Also run NestBoot for every method except tigress")
     bp.add_argument("--nest-runs", type=int, default=10)
     bp.add_argument("--boot-runs", type=int, default=10)
     bp.add_argument("--fdr", type=float, default=0.05)
     bp.add_argument(
         "--plot",
         action="store_true",
-        help="Write the SNR boxplot. Without --snr, redraw it from the saved table at -o",
+        help="Write the boxplot when the run finishes. With no run options, redraw it from the saved table at -o",
     )
     bp.add_argument("--n-nodes", type=int, default=50)
     bp.add_argument(
@@ -2601,28 +2509,35 @@ def main() -> None:
     bp.add_argument("--n-datasets", type=int, default=5)
     bp.add_argument("--seed", type=int, default=42)
     bp.add_argument("--timeout", type=int, default=60)
-    bp.add_argument("-o", "--output", default="benchmark_results.json")
+    bp.add_argument("-o", "--output", default="benchmark_results.json", help="Score table (.json), or the figure (.png, .pdf, .svg) with the tables beside it")
 
     # bench-gs (GeneSpider)
     gp = subs.add_parser(
         "bench-gs",
-        help="NestBoot benchmark on stored GeneSPIDER data (direct vs NestBoot)",
+        help="Benchmark on stored GeneSPIDER data, scored as bench --snr",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "Without --snr, run every stored dataset of --sizes. With --nestboot\n"
-            "(or tier nestboot) each method is scored directly and through\n"
-            "NestBoot. TIGRESS is scored directly only: it already bootstraps\n"
-            "through stability selection, so its NestBoot column reads\n"
-            "'excluded'.\n"
+            "Scores inference against GeneSPIDER true networks. The true network,\n"
+            "knockdown design and expression all come from the stored GeneSPIDER\n"
+            "JSON files at the pinned commits. Scoring, the score table, the\n"
+            "direct vs NestBoot table and the figure are the same as\n"
+            "`pygs bench --snr`, which generates new data instead.\n"
             "\n"
-            "With --snr, compare inferred networks to GeneSPIDER true networks.\n"
-            "The true network, knockdown design and expression all come from\n"
-            "the stored GeneSPIDER JSON files at the pinned commits. The three\n"
-            "N50 levels are SNR_L 0.01, 1, and 100 (filenames SNR10, SNR1000,\n"
-            "SNR100000). A value with no stored file stops the run before any\n"
-            "inference; `pygs bench --snr` generates data at other values.\n"
-            "--randomize also scores each method on gene-wise shuffled\n"
-            "expression. --nestboot adds NestBoot for every method except tigress.\n"
+            "Without --snr, every stored file of the chosen networks is scored at\n"
+            "its own SNR_L. --max-networks N takes N whole networks per size,\n"
+            "--max-datasets N the first N files; with neither, every complete\n"
+            "network. With --snr, only those levels are used, from --n-datasets\n"
+            "networks per topology of one size. The N50 levels are SNR_L 0.01, 1\n"
+            "and 100 (filenames SNR10, SNR1000, SNR100000); a value with no\n"
+            "stored file stops the run before any inference.\n"
+            "\n"
+            "--nestboot (or tier nestboot) also runs every method except tigress\n"
+            "through NestBoot. TIGRESS already bootstraps through stability\n"
+            "selection, so its NestBoot column reads 'excluded'. --randomize\n"
+            "also scores each method on gene-wise shuffled expression.\n"
+            "\n"
+            "  uv run pygs bench-gs --tier fast --nestboot \\\n"
+            "    --sizes N10 --max-networks 5 --plot -o benchmark/plots/gs_fast.png\n"
             "\n"
             "  uv run pygs bench-gs \\\n"
             "    --methods tigress,lasso,lsco \\\n"
@@ -2634,15 +2549,15 @@ def main() -> None:
             "    --plot -o benchmark/plots/snr_figure.json\n"
             "\n"
             "Writes the score table after each condition and every inferred\n"
-            "network under snr_figure_runs/. The same run is item 10 in\n"
-            "`uv run pygs`. Redraw the figure from the saved table:\n"
+            "network under <output>_runs/. Redraw the figure from the saved\n"
+            "table without running inference:\n"
             "\n"
             "  uv run pygs bench-gs --plot -o benchmark/plots/snr_figure.json"
         ),
     )
     gp.add_argument(
-        "--tier", default="fast",
-        help="Comma-separated: fast,medium,slow,very_slow,nestboot",
+        "--tier", default=None,
+        help="Comma-separated: fast,medium,slow,very_slow,nestboot (default fast)",
     )
     gp.add_argument("--methods", default=None, help="Comma-separated methods; overrides --tier")
     gp.add_argument(
@@ -2661,7 +2576,7 @@ def main() -> None:
     gp.add_argument(
         "--plot",
         action="store_true",
-        help="Write the SNR boxplot. Without --snr, redraw it from the saved table at -o",
+        help="Write the boxplot when the run finishes. With no run options, redraw it from the saved table at -o",
     )
     gp.add_argument(
         "--max-networks", type=int, default=0,
@@ -2671,7 +2586,7 @@ def main() -> None:
         "--max-datasets", type=int, default=0,
         help="First N dataset files in listing order, ignoring networks; overridden by --max-networks",
     )
-    gp.add_argument("--timeout", type=int, default=120)
+    gp.add_argument("--timeout", type=int, default=120, help="Ignored; kept so older commands still run")
     gp.add_argument(
         "--nestboot", action="store_true",
         help="Wrap methods in NestBoot FDR",
@@ -2680,7 +2595,7 @@ def main() -> None:
     gp.add_argument("--boot-runs", type=int, default=10)
     gp.add_argument("--fdr", type=float, default=0.05)
     gp.add_argument("--seed", type=int, default=42)
-    gp.add_argument("-o", "--output", default="benchmark_genespider.json")
+    gp.add_argument("-o", "--output", default="benchmark_genespider.json", help="Score table (.json), or the figure (.png, .pdf, .svg) with the tables beside it")
 
     # nestboot
     nb = subs.add_parser(
@@ -2691,7 +2606,11 @@ def main() -> None:
             "Flags and the data path can be in any order.\n"
             "  pygs nestboot data.csv -m lsco -i 100 -o 100\n"
             "  pygs nestboot --runs 100x100 -m lsco -f data.csv --output out.npy\n"
-            "-i is inner runs, -o is outer runs. The result path is --output."
+            "  pygs nestboot data.tsv -m lsco --runs 100x100 --zeta=-4:0:41 \\\n"
+            "      --output edges.tsv --nodes nodes.tsv\n"
+            "-i is inner runs, -o is outer runs. The result path is --output.\n"
+            "An edge table output writes edges and nodes at every FDR-controlled\n"
+            "sparsity (zeta column), or at --table-zeta only."
         ),
     )
     nb.add_argument(
@@ -2730,11 +2649,28 @@ def main() -> None:
     )
     nb.add_argument("--fdr", type=float, default=0.05, help="FDR threshold")
     nb.add_argument("--seed", type=int, default=42)
-    nb.add_argument("--output", default="nestboot.npy", help="Output adjacency .npy")
+    nb.add_argument(
+        "--output",
+        default="nestboot.npy",
+        help="Adjacency .npy, or an edge table (.tsv or .csv) with the arrays saved "
+        "beside it. Tables need --zeta",
+    )
+    nb.add_argument(
+        "--nodes",
+        default=None,
+        help="Node table path when --output is an edge table (default <edges>_nodes.tsv)",
+    )
     nb.add_argument(
         "--zeta",
         default=None,
         help="LSCO sparsity grid. -4:0:41 is logspace from 1e-4 to 1 with 41 steps. A comma list is used as written",
+    )
+    nb.add_argument(
+        "--table-zeta",
+        type=float,
+        default=None,
+        help="Write the tables for the sparsity nearest this zeta only. "
+        "Default: every FDR-controlled sparsity, with a zeta column",
     )
 
     # evaluate

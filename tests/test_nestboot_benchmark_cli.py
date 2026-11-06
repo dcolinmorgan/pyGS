@@ -21,7 +21,14 @@ def _row(method: str) -> dict:
     }
 
 
-def _run(monkeypatch, tmp_path: Path) -> tuple[list[dict], list[str]]:
+TRUE = np.array([[-1.0, 1.0, 0.0], [0.0, -1.0, 1.0], [1.0, 0.0, -1.0]])
+STACK = np.stack([TRUE, np.ones((3, 3))], axis=2)
+ALPHA = np.array([0.1, 1.0])
+
+
+def _run(monkeypatch, tmp_path: Path, **options) -> tuple[list[dict], list[str]]:
+    import bench.snr_benchmark as snr_benchmark
+
     nested: list[str] = []
     monkeypatch.setattr(
         genespider, "_list_datasets",
@@ -32,29 +39,74 @@ def _run(monkeypatch, tmp_path: Path) -> tuple[list[dict], list[str]]:
     )
     monkeypatch.setattr(
         genespider, "load_dataset",
-        lambda meta, size: (np.zeros((6, 3)), np.eye(6, 3), np.eye(3), "random", "net"),
+        lambda meta, size: (np.zeros((6, 3)), np.eye(6, 3), TRUE, "random", "net"),
     )
-    monkeypatch.setattr(genespider, "stored_snr_l", lambda meta: 1.0)
-    monkeypatch.setattr(cli, "_run_direct_fair", lambda name, *rest: _row(name))
+    monkeypatch.setattr(
+        genespider, "stored_snr_l", lambda meta: {10: 0.01, 1000: 1.0, 100000: 100.0}[meta["snr"]]
+    )
+    monkeypatch.setattr(snr_benchmark, "infer_stack", lambda method, Y, P, seed: (STACK, ALPHA))
 
-    def fake_nestboot(name, *rest):
-        nested.append(name)
-        return _row(f"nestboot:{name}")
+    def fake_nestboot(method, Y, P, A, args):
+        nested.append(method)
+        return STACK, ALPHA
 
-    monkeypatch.setattr(cli, "_run_nestboot_on_gs", fake_nestboot)
-    output = tmp_path / "nb.json"
-    cli._run_genespider_live(argparse.Namespace(
-        tier="", methods="lasso,tigress", sizes="N50", max_datasets=0, timeout=10,
-        output=str(output), nestboot=True, nest_runs=2, boot_runs=2, fdr=0.05, seed=1,
-    ))
-    return json.loads(output.read_text()), nested
+    monkeypatch.setattr(snr_benchmark, "nestboot_stack", fake_nestboot)
+    args = dict(
+        tier=None, methods="lasso,tigress", snr=None, sizes="N50",
+        topologies="random,smallworld,scalefree", max_datasets=0, max_networks=0,
+        output=str(tmp_path / "nb.json"), nestboot=True, nest_runs=2, boot_runs=2,
+        fdr=0.05, seed=1, randomize=False, plot=False,
+    )
+    args.update(options)
+    cli._run_genespider_live(argparse.Namespace(**args))
+    table = Path(args["output"])
+    if table.suffix == ".png":
+        table = table.with_suffix(".json")
+    return json.loads(table.read_text()), nested
 
 
 def test_tigress_is_scored_directly_but_never_run_through_nestboot(monkeypatch, tmp_path):
     rows, nested = _run(monkeypatch, tmp_path)
     assert nested == ["lasso"] * 3
-    assert sorted(row["method"] for row in rows) == sorted(["lasso", "nestboot:lasso", "tigress"] * 3)
-    assert all(row["snr_l"] == 1.0 for row in rows)
+    # One row per sparsity: 2 sparsities x 3 stored files for each run.
+    assert sorted(row["method"] for row in rows) == sorted(
+        ["lasso", "nestboot lasso", "tigress"] * 6
+    )
+
+
+def test_bench_gs_without_snr_scores_every_stored_file_at_its_snr(monkeypatch, tmp_path):
+    from bench.snr_benchmark import comparison_rows
+
+    rows, _ = _run(monkeypatch, tmp_path, tier="fast,nestboot", nestboot=False, methods="lasso")
+    assert sorted({row["snr"] for row in rows}) == [0.01, 1.0, 100.0]
+    summary = comparison_rows(rows)
+    assert sorted(row["method"] for row in summary) == sorted(["lasso", "nestboot:lasso"] * 3)
+
+
+def test_image_output_keeps_the_tables_beside_the_figure(monkeypatch, tmp_path):
+    from bench.snr_benchmark import output_paths
+
+    paths = output_paths(tmp_path / "Figure_3.png")
+    assert paths["figure"].name == "Figure_3.png"
+    assert paths["json"].name == "Figure_3.json"
+    assert paths["csv"].name == "Figure_3.csv"
+    assert paths["runs"].name == "Figure_3_runs"
+    assert output_paths("scores.csv")["json"].name == "scores.json"
+
+    drawn = []
+    monkeypatch.setattr(cli, "_write_snr_figure", lambda table, figure: drawn.append((table, figure)))
+    rows, _ = _run(monkeypatch, tmp_path, output=str(tmp_path / "Figure_3.png"), plot=True)
+    assert rows
+    assert drawn == [(tmp_path / "Figure_3.csv", tmp_path / "Figure_3.png")]
+
+
+def test_plot_alone_redraws_but_plot_with_run_options_runs(monkeypatch, tmp_path):
+    redrawn = []
+    monkeypatch.setattr(cli, "_replot_snr_figure", lambda args: redrawn.append(args.output))
+    assert cli._redraw_only(argparse.Namespace(plot=True, output="x.json", tier=None))
+    assert redrawn == ["x.json"]
+    for option in ("snr", "methods", "tier", "nestboot", "max_datasets"):
+        assert not cli._redraw_only(argparse.Namespace(plot=True, output="x.json", **{option: "1"}))
 
 
 def test_complete_networks_keeps_whole_networks_and_reports_the_rest(monkeypatch):

@@ -4,7 +4,8 @@
 the dataset JSON as the expression and knockdown design. Only stored files
 are used. The N50 collection has three levels, SNR_L 0.01, 1, and 100,
 stored under filenames SNR10, SNR1000, and SNR100000. A requested SNR with
-no matching file stops the run before any inference.
+no matching file stops the run before any inference. ``pygs bench-gs``
+without ``--snr`` scores every stored file of the chosen networks.
 
 ``pygs bench --snr`` generates the data instead. Each network has the
 requested size, topology and edge density, with a negative diagonal shifted
@@ -131,20 +132,56 @@ def _snr_label(snr: float) -> str:
     return f"{snr:g}"
 
 
+def _tiers(args: argparse.Namespace) -> list[str]:
+    tiers = str(getattr(args, "tier", None) or "fast")
+    return [tier.strip() for tier in tiers.split(",") if tier.strip()]
+
+
 def _methods(args: argparse.Namespace) -> list[str]:
     from sparselink import list_methods
-    from sparselink.bench.run_benchmark import TIERS
 
     import sparselink.methods  # noqa: F401
+    from bench.genespider import TIERS
 
     if getattr(args, "methods", None):
         names = [name.strip() for name in args.methods.split(",") if name.strip()]
     else:
         names = []
-        for tier in str(getattr(args, "tier", "fast")).split(","):
-            names.extend(TIERS.get(tier.strip(), []))
+        for tier in _tiers(args):
+            names.extend(TIERS.get(tier, []))
+    names.extend(getattr(args, "extra_methods", None) or [])
     registered = set(list_methods())
-    return [name for name in names if name in registered]
+    return [name for name in dict.fromkeys(names) if name in registered]
+
+
+def use_nestboot(args: argparse.Namespace) -> bool:
+    """``--nestboot``, or ``nestboot`` in the tier list as ``bench-gs`` allows."""
+    return bool(getattr(args, "nestboot", False)) or "nestboot" in _tiers(args)
+
+
+IMAGE_SUFFIXES = {".png", ".pdf", ".svg", ".jpg", ".jpeg"}
+
+
+def output_paths(output: str | Path) -> dict[str, Path]:
+    """Score table, figure and saved-run folder for ``-o``.
+
+    ``-o results.json`` writes results.json, results.csv, results.png and
+    results_runs/. ``-o Figure_3.png`` writes the figure there and the tables
+    beside it as Figure_3.json and Figure_3.csv.
+    """
+    path = Path(output)
+    if path.suffix.lower() in IMAGE_SUFFIXES:
+        figure, table = path, path.with_suffix(".json")
+    elif path.suffix.lower() == ".csv":
+        figure, table = path.with_suffix(".png"), path.with_suffix(".json")
+    else:
+        figure, table = path.with_suffix(".png"), path
+    return {
+        "json": table,
+        "csv": table.with_suffix(".csv"),
+        "figure": figure,
+        "runs": table.with_name(table.stem + "_runs"),
+    }
 
 
 def _size(args: argparse.Namespace) -> str:
@@ -342,7 +379,13 @@ def nestboot_stack(
     stack = np.asarray(result.sxnet, dtype=float)
     if stack.ndim == 2:
         stack = stack[:, :, None]
-    alpha = ZETA[: stack.shape[2]] if stack.shape[2] == len(ZETA) else np.arange(stack.shape[2], dtype=float)
+    from bench.genespider import ALPHA_SWEEP
+
+    # NestBoot drops trailing sparsities with no links, so a zeta stack can come back shorter.
+    if method_name in ALPHA_SWEEP and stack.shape[2] <= len(ZETA):
+        alpha = ZETA[: stack.shape[2]]
+    else:
+        alpha = np.arange(stack.shape[2], dtype=float)
     return stack, alpha
 
 
@@ -418,10 +461,15 @@ def _checkpoint(rows: list[dict], csv_path: Path, json_path: Path) -> None:
 def _stored_conditions(
     args: argparse.Namespace, snrs: list[float], topologies: list[str]
 ) -> tuple[list[dict[str, Any]], str]:
-    """Every (network, SNR) pair from stored files. A missing SNR stops the run."""
+    """Every (network, SNR) pair from stored files. A missing SNR stops the run.
+
+    Without ``--snr``, every stored file of the chosen networks is used.
+    """
     from bench.cli import ROSE, console
     from bench.genespider import select_networks
 
+    if not snrs:
+        return _all_stored_conditions(args, topologies)
     size = _size(args)
     if "," in size:
         console.print(f"  [{ROSE}]--snr takes one size; got {size}.[/]")
@@ -463,7 +511,71 @@ def _stored_conditions(
                 "seed_offset": 1000 * network_index + 10 * snr_index,
                 "note": f"stored file {stored['name']}",
             })
-    return conditions, f"GeneSPIDER {size} networks"
+    return conditions, f"GeneSPIDER {size} networks ({args.n_datasets} per topology)"
+
+
+def _all_stored_conditions(
+    args: argparse.Namespace, topologies: list[str]
+) -> tuple[list[dict[str, Any]], str]:
+    """Each stored file of the chosen networks, at its own SNR_L, for every size.
+
+    ``--max-networks N`` takes N whole networks, each at every stored SNR.
+    ``--max-datasets N`` takes the first N files in listing order. With
+    neither, every complete network is used. Files that fail to load are
+    reported and skipped.
+    """
+    from bench.cli import ORANGE, console
+    from bench.genespider import (
+        _list_datasets,
+        complete_networks,
+        load_dataset,
+        stored_snr_l,
+    )
+
+    max_networks = int(getattr(args, "max_networks", 0) or 0)
+    max_datasets = int(getattr(args, "max_datasets", 0) or 0)
+    sizes = [size.strip() for size in str(getattr(args, "sizes", "N50")).split(",") if size.strip()]
+    conditions: list[dict[str, Any]] = []
+    for size in sizes:
+        listed = _list_datasets(size)
+        if max_networks or not max_datasets:
+            loaded, skipped = complete_networks(listed, size, max_networks)
+        else:
+            loaded, skipped = [], []
+            for meta in listed[:max_datasets]:
+                try:
+                    loaded.append((meta, load_dataset(meta, size)))
+                except Exception as exc:
+                    skipped.append(f"{meta['path'].rsplit('/', 1)[-1]}: {str(exc)[:120]}")
+        for meta, (X, P, A, topology, network_name) in loaded:
+            name = meta["path"].rsplit("/", 1)[-1]
+            snr = stored_snr_l(meta)
+            if snr is None:
+                skipped.append(f"{name}: no SNR_L stored in the file")
+                continue
+            if topology not in topologies:
+                continue
+            conditions.append({
+                "topology": topology,
+                "network": network_name,
+                "A": np.asarray(A, dtype=float),
+                "snr": snr,
+                "Y": np.asarray(X, dtype=float).T,
+                "P": None if P is None else np.asarray(P, dtype=float).T,
+                "source": "genespider",
+                "dataset": name,
+                "seed_offset": 10 * len(conditions),
+                "note": f"stored file {name}",
+            })
+        for reason in skipped:
+            console.print(f"  [{ORANGE}]Skipped {reason}[/]")
+    if max_networks:
+        chosen = f"{max_networks} networks per size"
+    elif max_datasets:
+        chosen = f"first {max_datasets} files per size"
+    else:
+        chosen = "every complete network"
+    return conditions, f"GeneSPIDER {', '.join(sizes)} networks ({chosen}, every stored SNR)"
 
 
 def _simulated_conditions(
@@ -509,7 +621,9 @@ def _simulated_conditions(
                     "note": f"generated, {n_nodes} genes × {n_samples} experiments",
                 })
             network_index += 1
-    return conditions, f"generated N{n_nodes} networks at sparsity {sparsity:g}"
+    return conditions, (
+        f"generated N{n_nodes} networks at sparsity {sparsity:g} ({args.n_datasets} per topology)"
+    )
 
 
 def run_snr_benchmark(args: argparse.Namespace, simulate: bool = False) -> None:
@@ -533,23 +647,32 @@ def run_snr_benchmark(args: argparse.Namespace, simulate: bool = False) -> None:
     if not methods:
         console.print(f"  [{ROSE}]No valid methods selected.[/]")
         return
-    if not getattr(args, "snr", None):
-        console.print(f"  [{ROSE}]--snr is required.[/]")
+    if simulate and not getattr(args, "snr", None):
+        console.print(f"  [{ROSE}]--snr is required to generate data.[/]")
         return
 
-    snrs = parse_snrs(args.snr)
-    topologies = [name.strip() for name in args.topologies.split(",") if name.strip()]
+    snrs = parse_snrs(args.snr) if getattr(args, "snr", None) else []
+    topologies = [
+        name.strip()
+        for name in str(getattr(args, "topologies", ",".join(TOPOLOGIES))).split(",")
+        if name.strip()
+    ]
     arms = _arms(methods, args)
     from bench.genespider import NESTBOOT_EXCLUDED
 
-    nest_methods = [name for name in methods if name not in NESTBOOT_EXCLUDED] if args.nestboot else []
+    nested = use_nestboot(args)
+    nest_methods = [name for name in methods if name not in NESTBOOT_EXCLUDED] if nested else []
     build = _simulated_conditions if simulate else _stored_conditions
     conditions, description = build(args, snrs, topologies)
+    if not conditions:
+        console.print(f"  [{ROSE}]No datasets to score.[/]")
+        return
     n_networks = len({condition["network"] for condition in conditions})
+    if not snrs:
+        snrs = sorted({float(condition["snr"]) for condition in conditions})
 
-    run_dir = Path(args.output).with_name(Path(args.output).stem + "_runs")
-    csv_path = Path(args.output).with_suffix(".csv")
-    json_path = Path(args.output)
+    paths = output_paths(args.output)
+    run_dir, csv_path, json_path = paths["runs"], paths["csv"], paths["json"]
     per_condition = len(arms) + len(nest_methods)
     console.print(f"  [{TEAL}]Methods[/]     {', '.join(method for _, method, shuffled in arms if not shuffled)}")
     if getattr(args, "randomize", False):
@@ -558,14 +681,11 @@ def run_snr_benchmark(args: argparse.Namespace, simulate: bool = False) -> None:
         console.print(
             f"  [{TEAL}]NestBoot[/]    {', '.join(nest_methods)} ({args.nest_runs}×{args.boot_runs})"
         )
-    if args.nestboot:
+    if nested:
         for name in methods:
             if name in NESTBOOT_EXCLUDED:
                 console.print(f"  [{DIM}]{name} is scored directly only: {NESTBOOT_EXCLUDED[name]}[/]")
-    console.print(
-        f"  [{TEAL}]Networks[/]    {n_networks} {description} "
-        f"({args.n_datasets} per topology)"
-    )
+    console.print(f"  [{TEAL}]Networks[/]    {n_networks} {description}")
     console.print(f"  [{TEAL}]SNR[/]         {', '.join(_snr_label(snr) for snr in snrs)}")
     console.print(
         f"  [{TEAL}]Saved runs[/]  {run_dir}  ({len(conditions)} conditions × {per_condition} arms)"
@@ -655,7 +775,7 @@ def run_snr_benchmark(args: argparse.Namespace, simulate: bool = False) -> None:
         _render_results(summary, f"SNR benchmark ({len(summary)} runs)")
     console.print(f"\n  [{DIM}]Scores saved to {csv_path}[/]")
     console.print(f"  [{DIM}]Inferred networks saved to {run_dir}[/]")
-    if getattr(args, "plot", False):
-        figure = Path(args.output).with_suffix(".png")
+    if getattr(args, "plot", False) or getattr(args, "figure", False):
+        figure = paths["figure"]
         _write_snr_figure(csv_path, figure)
         console.print(f"  [{DIM}]Figure saved to {figure}[/]")
