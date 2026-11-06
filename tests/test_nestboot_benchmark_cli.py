@@ -259,3 +259,39 @@ def test_plotter_reads_bench_gs_rows(tmp_path):
     frame = plotter.load_scores(table)
     assert sorted(frame["method"]) == ["nestboot lsco", "tigress"]
     assert set(frame["snr"]) == {"0.01"}
+
+
+@pytest.mark.parametrize(
+    ("argv", "runner", "output", "n_datasets"),
+    [
+        (["bench-gs", "--tier", "fast"], "stored", "benchmark_genespider.json", 3),
+        (["bench", "--data", "stored", "--tier", "fast"], "stored", "benchmark_genespider.json", 3),
+        (["bench", "--methods", "lasso", "--snr", "0.1"], "generated", "benchmark_results.json", 5),
+        (["bench", "--tier", "fast"], "sparselink", "benchmark_results.json", 5),
+    ],
+)
+def test_bench_and_bench_gs_share_one_dispatcher(monkeypatch, argv, runner, output, n_datasets):
+    seen = []
+    monkeypatch.setattr(cli, "_run_genespider_live", lambda args: seen.append(("stored", args)))
+    monkeypatch.setattr(
+        cli, "_run_benchmark_live",
+        lambda args: seen.append(("generated" if args.snr else "sparselink", args)),
+    )
+    monkeypatch.setattr("sys.argv", ["pygs", *argv])
+    cli.main()
+    assert [name for name, _ in seen] == [runner]
+    assert seen[0][1].output == output
+    assert seen[0][1].n_datasets == n_datasets
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["bench", "--data", "sparselink", "--snr", "0.1"],
+        ["bench", "--data", "generated", "--methods", "lasso"],
+    ],
+)
+def test_bench_rejects_data_and_snr_that_do_not_fit(monkeypatch, argv):
+    monkeypatch.setattr("sys.argv", ["pygs", *argv])
+    with pytest.raises(SystemExit):
+        cli.main()

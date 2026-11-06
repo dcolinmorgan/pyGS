@@ -1,13 +1,13 @@
 """Benchmark inference against known true networks across SNR_L levels.
 
-``pygs bench-gs --snr`` loads the GeneSPIDER network JSON as the true GRN and
+``pygs bench --data stored`` loads the GeneSPIDER network JSON as the true GRN and
 the dataset JSON as the expression and knockdown design. Only stored files
 are used. The N50 collection has three levels, SNR_L 0.01, 1, and 100,
 stored under filenames SNR10, SNR1000, and SNR100000. A requested SNR with
-no matching file stops the run before any inference. ``pygs bench-gs``
-without ``--snr`` scores every stored file of the chosen networks.
+no matching file stops the run before any inference. Without ``--snr``,
+every stored file of the chosen networks is scored.
 
-``pygs bench --snr`` generates the data instead. Each network has the
+``pygs bench --data generated`` generates the data instead. Each network has the
 requested size, topology and edge density, with a negative diagonal shifted
 until A + A.T is negative definite and cond(A) <= N/2. The design repeats
 single-gene knockdowns, and Y = -pinv(A) @ P + E with E scaled so SNR_L is
@@ -155,7 +155,7 @@ def _methods(args: argparse.Namespace) -> list[str]:
 
 
 def use_nestboot(args: argparse.Namespace) -> bool:
-    """``--nestboot``, or ``nestboot`` in the tier list as ``bench-gs`` allows."""
+    """``--nestboot``, or ``nestboot`` in the ``--tier`` list."""
     return bool(getattr(args, "nestboot", False)) or "nestboot" in _tiers(args)
 
 
@@ -282,7 +282,7 @@ def nestboot_slices(stack: np.ndarray) -> np.ndarray:
     NestBoot counts how often a link is nonzero, so dense weights would give
     every link full support. A sweep keeps the upper half of the nonzero
     weights in each slice; a single network is cut at the 10th to 90th
-    percentile instead. ``pygs bench-gs --nestboot`` uses the same rule.
+    percentile instead. ``pygs bench --nestboot`` uses the same rule.
     """
     slices = []
     if stack.shape[2] == 1:
@@ -496,7 +496,7 @@ def _stored_conditions(
                     f"  [{ROSE}]No stored GeneSPIDER file for SNR {_snr_label(snr)}[/] "
                     f"on {network_name}. Available SNR_L values: {available}. "
                     "The N50 files are 0.01, 1, and 100 (filenames SNR10, SNR1000, SNR100000). "
-                    "`pygs bench --snr` generates data at any SNR."
+                    "`pygs bench --data generated` generates data at any SNR."
                 )
                 raise SystemExit(1)
             conditions.append({

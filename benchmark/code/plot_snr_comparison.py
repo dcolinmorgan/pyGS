@@ -8,7 +8,7 @@ AUROC, not maxAUROC.
 
 Expected columns: dataset, method, auroc, f1_score (or f1), mcc.
 SNR is read from an ``snr_l`` column when every row has one, else from
-``snr`` or from names such as ``SNR0.01-...``. ``pygs bench-gs`` JSON
+``snr`` or from names such as ``SNR0.01-...``. ``pygs bench --data stored`` JSON
 records the filename SNR in ``snr`` and SNR_L in ``snr_l``.
 
 The chapter figure also includes randomized TIGRESS, LASSO and LSCO. Those

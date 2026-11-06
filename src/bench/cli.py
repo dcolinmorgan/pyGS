@@ -10,17 +10,19 @@ Usage::
     pygs methods                                 # list inference methods
     pygs infer data.csv -m lasso                 # infer a GRN
     pygs infer https://example/ymatrix.csv -m lsco
-    pygs bench --tier fast                       # synthetic benchmark
-    uv run pygs bench --methods tigress,lasso,lsco \
+    pygs bench --tier fast                       # sparselink synthetic benchmark
+    uv run pygs bench --data generated --methods tigress,lasso,lsco \
         --snr 0.01,0.1,1,10,100 --n-nodes 50 --sparsity 0.06 --n-datasets 3 \
         --plot -o benchmark/plots/snr_simulated.json   # generated networks
-    pygs bench-gs --methods lasso,lsco,tigress --nestboot --sizes N50   # NestBoot benchmark; tigress direct only
-    uv run pygs bench-gs --methods tigress,lasso,lsco \
+    uv run pygs bench --data stored --tier fast --nestboot \
+        --sizes N10 --max-networks 4 --plot -o gs_fast.png  # stored files, every SNR
+    uv run pygs bench --data stored --methods tigress,lasso,lsco \
         --nestboot --nest-runs 10 --boot-runs 10 --randomize \
         --snr 0.01,1,100 --topologies random,smallworld,scalefree \
         --sizes N50 --n-datasets 3 \
-        --plot -o benchmark/plots/snr_figure.json       # stored files
-    uv run pygs bench-gs --plot -o benchmark/plots/snr_figure.json
+        --plot -o benchmark/plots/snr_figure.json       # stored files at chosen SNRs
+    uv run pygs bench --plot -o benchmark/plots/snr_figure.json   # redraw only
+    pygs bench-gs ...                            # same as pygs bench --data stored
     pygs nestboot data.csv -m lsco --nest-runs 100 --boot-runs 100 --zeta=-4:0:41 --output out.npy
     pygs plot out.npy --zeta 0.063 --per-gene 3 -o edges.csv
     pygs nestboot --runs 100x100 -m lsco -f data.csv --output out.npy
@@ -547,22 +549,22 @@ BENCHMARK_SOURCES: dict[str, tuple[str, str]] = {
     "1": (
         "generated",
         "New GeneSPIDER-style data: stable networks, knockdown design, any SNR_L"
-        " (pygs bench --snr)",
+        " (pygs bench --data generated)",
     ),
     "2": (
         "stored-nestboot",
-        "Stored GeneSPIDER data (Bitbucket, cached in .gs_cache): every dataset,"
-        " direct vs NestBoot table (pygs bench-gs)",
+        "Stored GeneSPIDER data (Bitbucket, cached in .gs_cache): whole networks"
+        " at every stored SNR_L (pygs bench --data stored)",
     ),
     "3": (
         "stored-snr",
-        "Stored GeneSPIDER data at SNR_L 0.01, 1 or 100: saves every inferred"
-        " network and the boxplot (pygs bench-gs --snr)",
+        "Stored GeneSPIDER data at chosen SNR_L levels (0.01, 1, 100), networks"
+        " per topology (pygs bench --data stored --snr)",
     ),
     "4": (
         "sparselink",
         "sparselink synthetic data: no knockdown design, noise as a standard"
-        " deviation, not comparable with 1-3 (pygs bench)",
+        " deviation, not comparable with 1-3 (pygs bench --data sparselink)",
     ),
 }
 
@@ -797,7 +799,38 @@ def _configure_snr_figure(simulate: bool = False) -> argparse.Namespace:
     )
 
 
-RUN_OPTIONS = ("snr", "methods", "tier", "nestboot", "randomize", "max_datasets", "max_networks")
+RUN_OPTIONS = (
+    "data", "snr", "methods", "tier", "nestboot", "randomize", "max_datasets", "max_networks",
+)
+BENCH_DATA = ("stored", "generated", "sparselink")
+
+
+def _cmd_bench(args: argparse.Namespace) -> None:
+    """``pygs bench`` and its ``bench-gs`` alias (``--data stored``)."""
+    data = (
+        getattr(args, "data", None)
+        or getattr(args, "data_alias", None)
+        or ("generated" if getattr(args, "snr", None) else "sparselink")
+    )
+    if getattr(args, "output", None) is None:
+        args.output = "benchmark_genespider.json" if data == "stored" else "benchmark_results.json"
+    if getattr(args, "n_datasets", None) is None:
+        args.n_datasets = 3 if data == "stored" else 5
+    if _redraw_only(args):
+        return
+    if data == "sparselink" and getattr(args, "snr", None):
+        console.print(
+            f"  [{ROSE}]sparselink data has noise levels, not SNR_L.[/] "
+            "Use --data generated or --data stored with --snr."
+        )
+        raise SystemExit(2)
+    if data == "generated" and not getattr(args, "snr", None):
+        console.print(f"  [{ROSE}]--data generated needs --snr, e.g. --snr 0.01,0.1,1[/]")
+        raise SystemExit(2)
+    if data == "stored":
+        _run_genespider_live(args)
+    else:
+        _run_benchmark_live(args)
 
 
 def _redraw_only(args: argparse.Namespace) -> bool:
@@ -999,7 +1032,7 @@ def _configure_genespider() -> argparse.Namespace:
 
 
 def _run_genespider_live(args: argparse.Namespace) -> None:
-    """Benchmark on stored GeneSPIDER data, with the same runner as ``bench --snr``.
+    """Benchmark on stored GeneSPIDER data (``pygs bench --data stored``).
 
     Without ``--snr`` every stored file of the chosen networks is scored at
     its own SNR_L.
@@ -2443,159 +2476,126 @@ def main() -> None:
         "--directed", action="store_true", help="Infer edge direction from perturbation asymmetry"
     )
 
-    # bench (synthetic)
+    # bench (stored GeneSPIDER, generated GeneSPIDER-style, or sparselink synthetic data)
+    bench_epilog = (
+        "--data picks the data; every source but sparselink is scored the same way:\n"
+        "every sparsity of each method is scored against the true network, the\n"
+        "summary takes the best F1 and MCC and the AUROC at the best-F1\n"
+        "sparsity, every inferred network is saved under <output>_runs/, and the\n"
+        "direct vs NestBoot table is printed.\n"
+        "\n"
+        "  stored     Stored GeneSPIDER files at the pinned Bitbucket commits.\n"
+        "             Without --snr, every stored file of the chosen networks at\n"
+        "             its own SNR_L: --max-networks N takes N whole networks per\n"
+        "             size, --max-datasets N the first N files, neither every\n"
+        "             complete network. With --snr, those levels only, from\n"
+        "             --n-datasets networks per topology of one size. N50 has SNR_L\n"
+        "             0.01, 1 and 100 (filenames SNR10, SNR1000, SNR100000).\n"
+        "  generated  New GeneSPIDER-style networks of --n-nodes genes, one of\n"
+        "             --topologies, --sparsity edge density, stable with\n"
+        "             cond(A) <= N/2, a single-gene knockdown design over\n"
+        "             --n-samples experiments (default 3 per gene), and noise\n"
+        "             scaled so each --snr value is hit exactly.\n"
+        "  sparselink sparselink's synthetic benchmark at noise std 0.01, 0.1 and\n"
+        "             1. It has no knockdown design.\n"
+        "\n"
+        "Without --data: generated with --snr, sparselink without.\n"
+        "--nestboot (or tier nestboot) also runs every method except tigress\n"
+        "through NestBoot; TIGRESS already bootstraps through stability\n"
+        "selection, so its NestBoot column reads 'excluded'. --randomize also\n"
+        "scores each method on gene-wise shuffled expression.\n"
+        "\n"
+        "  uv run pygs bench --data stored --tier fast --nestboot \\\n"
+        "    --sizes N10 --max-networks 4 --plot -o benchmark/plots/gs_fast.png\n"
+        "\n"
+        "  uv run pygs bench --data generated \\\n"
+        "    --methods tigress,lasso,lsco --nestboot --nest-runs 10 --boot-runs 10 \\\n"
+        "    --snr 0.01,0.1,1 --topologies random,smallworld,scalefree \\\n"
+        "    --n-nodes 10 --n-datasets 3 --plot -o Figure_3.png\n"
+        "\n"
+        "-o names the score table (.json), or the figure (.png, .pdf, .svg) with\n"
+        "the tables beside it. Redraw the figure from a saved table, without\n"
+        "running inference:\n"
+        "\n"
+        "  uv run pygs bench --plot -o Figure_3.png"
+    )
+
+    def _bench_arguments(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument(
+            "--data", choices=list(BENCH_DATA), default=None,
+            help="stored, generated or sparselink (default: generated with --snr, else sparselink)",
+        )
+        parser.add_argument(
+            "--tier", default=None,
+            help="Comma-separated: fast,medium,slow,very_slow,nestboot (default fast)",
+        )
+        parser.add_argument("--methods", default=None, help="Comma-separated methods; overrides --tier")
+        parser.add_argument(
+            "--snr", default=None,
+            help="Comma-separated SNR_L values: levels to generate, or stored levels to keep",
+        )
+        parser.add_argument("--topologies", default="random,smallworld,scalefree")
+        parser.add_argument(
+            "--n-datasets", type=int, default=None,
+            help="Networks per topology (default 3 stored with --snr, 5 otherwise; 0 = all stored)",
+        )
+        parser.add_argument("--randomize", action="store_true", help="Also score each method on gene-wise shuffled data")
+        parser.add_argument(
+            "--nestboot", action="store_true", help="Also run NestBoot for every method except tigress"
+        )
+        parser.add_argument("--nest-runs", type=int, default=10)
+        parser.add_argument("--boot-runs", type=int, default=10)
+        parser.add_argument("--fdr", type=float, default=0.05)
+        parser.add_argument(
+            "--plot", action="store_true",
+            help="Write the boxplot when the run finishes. With no run options, redraw it from the saved table at -o",
+        )
+        stored = parser.add_argument_group("stored data")
+        stored.add_argument(
+            "--sizes", default="N50", help="Comma-separated: N10,N50,N100. One size with --snr"
+        )
+        stored.add_argument(
+            "--max-networks", type=int, default=0,
+            help="Networks per size, each at every stored SNR; incomplete networks are skipped (0 = all)",
+        )
+        stored.add_argument(
+            "--max-datasets", type=int, default=0,
+            help="First N dataset files in listing order, ignoring networks; overridden by --max-networks",
+        )
+        generated = parser.add_argument_group("generated and sparselink data")
+        generated.add_argument("--n-nodes", type=int, default=50)
+        generated.add_argument(
+            "--sparsity", type=float, default=0.06, help="True-network edge density (generated)"
+        )
+        generated.add_argument(
+            "--n-samples", type=int, default=None,
+            help="Experiments per dataset. Default 3 per gene for generated, 200 for sparselink",
+        )
+        generated.add_argument(
+            "--timeout", type=int, default=60, help="Seconds per method (sparselink only)"
+        )
+        parser.add_argument("--seed", type=int, default=42)
+        parser.add_argument(
+            "-o", "--output", default=None,
+            help="Score table (.json), or the figure (.png, .pdf, .svg) with the tables beside it",
+        )
+
     bp = subs.add_parser(
         "bench",
-        help="Synthetic benchmark, or an SNR benchmark on generated networks",
+        help="Benchmark against true networks: stored GeneSPIDER, generated, or sparselink data",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "With --snr, generate new networks and data from the flags and\n"
-            "score inference against them. Each network has --n-nodes genes,\n"
-            "one of --topologies, and --sparsity edge density. Its diagonal is\n"
-            "shifted until every eigenvalue has a negative real part and\n"
-            "cond(A) <= N/2. The design repeats single-gene knockdowns over\n"
-            "--n-samples experiments (default 3 per gene, as in the GeneSPIDER\n"
-            "N50 files). Expression is Y = -pinv(A) P + E, with E scaled so\n"
-            "SNR_L is each --snr value. Any positive SNR works. For the stored\n"
-            "GeneSPIDER files, use `pygs bench-gs --snr`.\n"
-            "--randomize also scores each method on gene-wise shuffled\n"
-            "expression. --nestboot adds NestBoot for every method except tigress.\n"
-            "\n"
-            "  uv run pygs bench \\\n"
-            "    --methods tigress,lasso,lsco \\\n"
-            "    --nestboot --nest-runs 10 --boot-runs 10 \\\n"
-            "    --randomize \\\n"
-            "    --snr 0.01,0.1,1,10,100 \\\n"
-            "    --topologies random,smallworld,scalefree \\\n"
-            "    --n-nodes 50 --sparsity 0.06 --n-datasets 3 \\\n"
-            "    --plot -o benchmark/plots/snr_simulated.json\n"
-            "\n"
-            "Writes the score table after each condition and every inferred\n"
-            "network, with its true network, under snr_simulated_runs/.\n"
-            "--plot writes the boxplot when the run finishes.\n"
-            "\n"
-            "Redraw that figure from the saved table, including a partial\n"
-            "CSV, without running inference again:\n"
-            "\n"
-            "  uv run pygs bench --plot -o benchmark/plots/snr_simulated.json"
-        ),
+        epilog=bench_epilog,
     )
-    bp.add_argument("--tier", default=None, help="Comma-separated tiers (default fast)")
-    bp.add_argument("--methods", default=None, help="Comma-separated methods; overrides --tier")
-    bp.add_argument(
-        "--snr",
-        default=None,
-        help="Comma-separated SNR_L values. Generates networks and data at each value",
-    )
-    bp.add_argument("--topologies", default="random,smallworld,scalefree")
-    bp.add_argument("--sparsity", type=float, default=0.06, help="True-network edge density in SNR mode")
-    bp.add_argument("--randomize", action="store_true", help="Also score each method on gene-wise shuffled data")
-    bp.add_argument("--nestboot", action="store_true", help="Also run NestBoot for every method except tigress")
-    bp.add_argument("--nest-runs", type=int, default=10)
-    bp.add_argument("--boot-runs", type=int, default=10)
-    bp.add_argument("--fdr", type=float, default=0.05)
-    bp.add_argument(
-        "--plot",
-        action="store_true",
-        help="Write the boxplot when the run finishes. With no run options, redraw it from the saved table at -o",
-    )
-    bp.add_argument("--n-nodes", type=int, default=50)
-    bp.add_argument(
-        "--n-samples",
-        type=int,
-        default=None,
-        help="Experiments per dataset. Default 3 per gene with --snr, else 200",
-    )
-    bp.add_argument("--n-datasets", type=int, default=5)
-    bp.add_argument("--seed", type=int, default=42)
-    bp.add_argument("--timeout", type=int, default=60)
-    bp.add_argument("-o", "--output", default="benchmark_results.json", help="Score table (.json), or the figure (.png, .pdf, .svg) with the tables beside it")
+    _bench_arguments(bp)
 
-    # bench-gs (GeneSpider)
     gp = subs.add_parser(
         "bench-gs",
-        help="Benchmark on stored GeneSPIDER data, scored as bench --snr",
+        help="Same as bench --data stored (kept for older commands)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "Scores inference against GeneSPIDER true networks. The true network,\n"
-            "knockdown design and expression all come from the stored GeneSPIDER\n"
-            "JSON files at the pinned commits. Scoring, the score table, the\n"
-            "direct vs NestBoot table and the figure are the same as\n"
-            "`pygs bench --snr`, which generates new data instead.\n"
-            "\n"
-            "Without --snr, every stored file of the chosen networks is scored at\n"
-            "its own SNR_L. --max-networks N takes N whole networks per size,\n"
-            "--max-datasets N the first N files; with neither, every complete\n"
-            "network. With --snr, only those levels are used, from --n-datasets\n"
-            "networks per topology of one size. The N50 levels are SNR_L 0.01, 1\n"
-            "and 100 (filenames SNR10, SNR1000, SNR100000); a value with no\n"
-            "stored file stops the run before any inference.\n"
-            "\n"
-            "--nestboot (or tier nestboot) also runs every method except tigress\n"
-            "through NestBoot. TIGRESS already bootstraps through stability\n"
-            "selection, so its NestBoot column reads 'excluded'. --randomize\n"
-            "also scores each method on gene-wise shuffled expression.\n"
-            "\n"
-            "  uv run pygs bench-gs --tier fast --nestboot \\\n"
-            "    --sizes N10 --max-networks 5 --plot -o benchmark/plots/gs_fast.png\n"
-            "\n"
-            "  uv run pygs bench-gs \\\n"
-            "    --methods tigress,lasso,lsco \\\n"
-            "    --nestboot --nest-runs 10 --boot-runs 10 \\\n"
-            "    --randomize \\\n"
-            "    --snr 0.01,1,100 \\\n"
-            "    --topologies random,smallworld,scalefree \\\n"
-            "    --sizes N50 --n-datasets 3 \\\n"
-            "    --plot -o benchmark/plots/snr_figure.json\n"
-            "\n"
-            "Writes the score table after each condition and every inferred\n"
-            "network under <output>_runs/. Redraw the figure from the saved\n"
-            "table without running inference:\n"
-            "\n"
-            "  uv run pygs bench-gs --plot -o benchmark/plots/snr_figure.json"
-        ),
+        epilog="Same as `pygs bench --data stored`; see `pygs bench --help`.",
     )
-    gp.add_argument(
-        "--tier", default=None,
-        help="Comma-separated: fast,medium,slow,very_slow,nestboot (default fast)",
-    )
-    gp.add_argument("--methods", default=None, help="Comma-separated methods; overrides --tier")
-    gp.add_argument(
-        "--snr",
-        default=None,
-        help="Comma-separated SNR_L values of stored files. N50 has 0.01, 1, and 100",
-    )
-    gp.add_argument(
-        "--sizes", default="N50", help="Comma-separated: N10,N50,N100. One size with --snr"
-    )
-    gp.add_argument("--topologies", default="random,smallworld,scalefree")
-    gp.add_argument(
-        "--n-datasets", type=int, default=3, help="Networks per topology with --snr (0 = all)"
-    )
-    gp.add_argument("--randomize", action="store_true", help="Also score each method on gene-wise shuffled data")
-    gp.add_argument(
-        "--plot",
-        action="store_true",
-        help="Write the boxplot when the run finishes. With no run options, redraw it from the saved table at -o",
-    )
-    gp.add_argument(
-        "--max-networks", type=int, default=0,
-        help="Networks per size, each at every stored SNR; incomplete networks are skipped (0 = all)",
-    )
-    gp.add_argument(
-        "--max-datasets", type=int, default=0,
-        help="First N dataset files in listing order, ignoring networks; overridden by --max-networks",
-    )
-    gp.add_argument("--timeout", type=int, default=120, help="Ignored; kept so older commands still run")
-    gp.add_argument(
-        "--nestboot", action="store_true",
-        help="Wrap methods in NestBoot FDR",
-    )
-    gp.add_argument("--nest-runs", type=int, default=10)
-    gp.add_argument("--boot-runs", type=int, default=10)
-    gp.add_argument("--fdr", type=float, default=0.05)
-    gp.add_argument("--seed", type=int, default=42)
-    gp.add_argument("-o", "--output", default="benchmark_genespider.json", help="Score table (.json), or the figure (.png, .pdf, .svg) with the tables beside it")
+    _bench_arguments(gp)
+    gp.set_defaults(data_alias="stored")
 
     # nestboot
     nb = subs.add_parser(
@@ -2740,10 +2740,8 @@ def main() -> None:
         _cmd_methods(args)
     elif args.command == "infer":
         _cmd_infer(args)
-    elif args.command == "bench":
-        _run_benchmark_live(args)
-    elif args.command == "bench-gs":
-        _run_genespider_live(args)
+    elif args.command in ("bench", "bench-gs"):
+        _cmd_bench(args)
     elif args.command == "nestboot":
         if args.runs:
             args.nest_runs, args.boot_runs = _parse_runs(args.runs)

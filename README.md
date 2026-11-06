@@ -64,9 +64,11 @@ pygs methods                                      # list all inference methods
 pygs infer data.csv -m lasso -o adj.npy           # infer a network
 
 # Benchmarking
-pygs bench --tier fast --timeout 60               # synthetic benchmark (sparselink)
-pygs bench-gs --tier fast --sizes N50             # GeneSpider benchmark (real data)
-pygs bench-gs --tier fast,nestboot --sizes N50    # GeneSpider direct vs NestBoot comparison
+pygs bench --data sparselink --tier fast          # sparselink synthetic benchmark
+pygs bench --data stored --tier fast --sizes N50  # stored GeneSPIDER data, every SNR_L
+pygs bench --data stored --tier fast --nestboot --sizes N50 --plot -o gs.png   # direct vs NestBoot
+pygs bench --data generated --methods tigress,lasso,lsco --nestboot --snr 0.01,0.1,1 --n-nodes 10 --plot -o fig.png
+# pygs bench-gs ... is the same as pygs bench --data stored
 
 # NestBoot FDR
 pygs nestboot expr.csv -m lasso --fdr 0.05        # bootstrap FDR-controlled inference
