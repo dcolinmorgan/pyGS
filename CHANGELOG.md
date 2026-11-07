@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `pygs` no longer prints sklearn's "`sklearn.utils.parallel.delayed` should be used with `sklearn.utils.parallel.Parallel`" warning once per tree when NestBoot fits genie3 in many threads. On Python < 3.14 each sklearn task clears the process-wide warning filters, so the CLI's ignore filter could not hold; the message is now dropped when printed
+- The same race let sklearn's `ConvergenceWarning` ("Objective did not converge") through once per LASSO or elastic net bootstrap fit at small regularisation values; it is dropped when printed too
 
 ### Changed
 - Knockdown labels become -1 in P again, GeneSPIDER's convention for Y = -A⁻¹P, so LSCO returns a negative diagonal and activations as positive links. With +1, every link's sign was reversed, and NestBoot drew its bootstraps in a different order for the same seed

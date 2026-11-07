@@ -2523,19 +2523,30 @@ def _parse_runs(text: str) -> tuple[int, int]:
 SKLEARN_DELAYED_WARNING = "`sklearn.utils.parallel.delayed` should be used with"
 
 
-def _drop_sklearn_delayed_warning() -> None:
-    """Never print sklearn's ``delayed`` warning.
+def _is_dropped_sklearn_warning(message: object, category: type) -> bool:
+    """sklearn's ``delayed`` warning, or its ``ConvergenceWarning``.
+
+    LASSO and elastic net reach their iteration limit at the smallest
+    regularisation values of a sweep, once per bootstrap fit.
+    """
+    if SKLEARN_DELAYED_WARNING in str(message):
+        return True
+    return category.__name__ == "ConvergenceWarning" and category.__module__.startswith("sklearn")
+
+
+def _drop_sklearn_warnings() -> None:
+    """Never print the warnings ``_is_dropped_sklearn_warning`` matches.
 
     Each sklearn parallel task runs ``warnings.resetwarnings()``, which on
     Python < 3.14 clears the process-wide filter list. With NestBoot fitting
-    forests in many threads, other tasks then find no filters and print the
-    warning once per tree, whatever filters the CLI set. ``showwarning`` is
-    not reset, so the message is dropped there.
+    in many threads, other fits then find no filters and print every
+    warning, whatever filters the CLI set. ``showwarning`` is not reset, so
+    the messages are dropped there.
     """
     show = warnings.showwarning
 
     def _show(message, category, filename, lineno, file=None, line=None):
-        if SKLEARN_DELAYED_WARNING in str(message):
+        if _is_dropped_sklearn_warning(message, category):
             return
         show(message, category, filename, lineno, file, line)
 
@@ -2543,7 +2554,7 @@ def _drop_sklearn_delayed_warning() -> None:
 
 
 def main() -> None:
-    _drop_sklearn_delayed_warning()
+    _drop_sklearn_warnings()
     parser = argparse.ArgumentParser(
         prog="pygs",
         description="pyGS — gene regulatory network inference & benchmarking",

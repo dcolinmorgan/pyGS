@@ -297,12 +297,18 @@ def test_bench_rejects_data_and_snr_that_do_not_fit(monkeypatch, argv):
         cli.main()
 
 
-def test_sklearn_delayed_warning_is_dropped_but_others_print(monkeypatch):
+def test_sklearn_delayed_and_convergence_warnings_are_dropped_but_others_print(monkeypatch):
     import warnings
+
+    from sklearn.exceptions import ConvergenceWarning
 
     shown = []
     monkeypatch.setattr(warnings, "showwarning", lambda message, *rest: shown.append(str(message)))
-    cli._drop_sklearn_delayed_warning()
-    for text in (cli.SKLEARN_DELAYED_WARNING + " `sklearn.utils.parallel.Parallel`", "another warning"):
-        warnings.showwarning(UserWarning(text), UserWarning, "x.py", 1)
+    cli._drop_sklearn_warnings()
+    for text, category in (
+        (cli.SKLEARN_DELAYED_WARNING + " `sklearn.utils.parallel.Parallel`", UserWarning),
+        ("Objective did not converge.", ConvergenceWarning),
+        ("another warning", UserWarning),
+    ):
+        warnings.showwarning(category(text), category, "x.py", 1)
     assert shown == ["another warning"]
