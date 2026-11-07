@@ -1354,12 +1354,23 @@ def _parse_zeta(text: str) -> np.ndarray:
 
 
 def _save_nestboot_zeta(
-    out: Path, results, genes: list[str], zeta: np.ndarray, Y, P, fdr: float
+    out: Path,
+    results,
+    genes: list[str],
+    zeta: np.ndarray,
+    Y,
+    P,
+    fdr: float,
+    *,
+    kd_z: np.ndarray | None = None,
+    failed: np.ndarray | None = None,
+    dropouts_filled: int = 0,
 ) -> None:
     """Write the signed stack, the support archive and the support table.
 
     ``pygs plot --zeta`` reads the archive; ``nestboot_report/plot_support.py``
-    reads the archive and the table.
+    reads the archive and the table. ``kd_z`` is measured before failed
+    knockdowns are removed, since a removed knockdown has no samples left.
     """
     import pandas as pd
 
@@ -1377,10 +1388,15 @@ def _save_nestboot_zeta(
     zetas = np.asarray(zeta, dtype=float)
     if len(zetas) != xnet.shape[2]:
         zetas = np.full(xnet.shape[2], np.nan)
-    try:
-        kz = knockdown_z(np.asarray(Y), np.asarray(P))
-    except Exception:
-        kz = np.full(len(genes), np.nan)
+    if kd_z is not None:
+        kz = np.asarray(kd_z, dtype=float)
+    else:
+        try:
+            kz = knockdown_z(np.asarray(Y), np.asarray(P))
+        except Exception:
+            kz = np.full(len(genes), np.nan)
+    if failed is None:
+        failed = np.zeros(len(genes), dtype=bool)
     np.savez_compressed(
         out.with_name(out.stem + "_support.npz"),
         zetavec=zetas,
@@ -1393,7 +1409,8 @@ def _save_nestboot_zeta(
         fdr_reached=np.any(fdr_curve[:, :-1] <= fdr, axis=1),
         genes=np.asarray(genes),
         knockdown_z=kz,
-        failed_knockdowns=np.zeros(len(genes), dtype=bool),
+        failed_knockdowns=np.asarray(failed, dtype=bool),
+        dropouts_filled=int(dropouts_filled),
     )
     pd.DataFrame(_support_rows(results, zetas)).to_csv(
         out.with_name(out.stem + "_support.tsv"), sep="\t", index=False
@@ -1489,6 +1506,40 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
     n_genes, n_samples = matrix.shape
     console.print(f"  [{DIM}]{n_genes} genes × {n_samples} samples[/]")
 
+    from bio.knockdown import drop_failed_knockdowns, fill_dropouts, knockdown_z
+
+    design = None if P is None else P.T
+    if design is not None:
+        console.print(
+            f"  [{TEAL}]Design[/]  knockdown labels → perturbation matrix"
+        )
+    dropout_below = getattr(args, "dropout_below", None)
+    max_knockdown_z = getattr(args, "max_knockdown_z", None)
+    n_dropouts = 0
+    if dropout_below is not None:
+        groups = design if design is not None else np.zeros_like(matrix)
+        matrix, dropped = fill_dropouts(matrix, groups, dropout_below)
+        n_dropouts = int(dropped.sum())
+        console.print(
+            f"  [{TEAL}]Dropouts[/] {n_dropouts} values < {dropout_below} "
+            f"in {int(dropped.any(axis=1).sum())} genes filled from replicates"
+        )
+    kd_z = np.full(n_genes, np.nan) if design is None else knockdown_z(matrix, design)
+    failed = np.zeros(n_genes, dtype=bool)
+    if max_knockdown_z is not None:
+        if design is None:
+            console.print(f"  [{ROSE}]--max-knockdown-z needs a knockdown design[/]")
+            raise SystemExit(2)
+        matrix, design, failed = drop_failed_knockdowns(
+            matrix, design, max_knockdown_z
+        )
+        console.print(
+            f"  [{TEAL}]Knockdowns[/] {int(failed.sum())} with own-gene z > "
+            f"{max_knockdown_z} removed ({matrix.shape[1]} samples left): "
+            f"{', '.join(np.asarray(gene_names)[failed])}"
+        )
+    n_samples = matrix.shape[1]
+
     # Build a Dataset for Nestboot
     from analyze.Data import Data
     from datastruct.Dataset import Dataset
@@ -1496,11 +1547,8 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
 
     ds = Dataset()
     ds._Y = matrix
-    if P is not None:
-        ds._P = P.T
-        console.print(
-            f"  [{TEAL}]Design[/]  knockdown labels → perturbation matrix"
-        )
+    if design is not None:
+        ds._P = design
     else:
         ds._P = np.eye(n_genes, n_samples)
     ds._network = Network(np.zeros((n_genes, n_genes)))
@@ -1524,10 +1572,19 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
     method_cls = get_method(method_name)
 
     use_P = method_name in PERTURBATION_METHODS
+    # GeneSPIDER's NestBoot LSCO (rawZeta = 1) cuts |coefficient| <= zeta on Y
+    # rescaled to [-1, 1] over the whole matrix, so a zeta grid means the same
+    # sparsities on any data scale.
+    rescale = zeta is not None and method_name == "lsco"
+    y_lo, y_hi = float(matrix.min()), float(matrix.max())
+    if rescale:
+        console.print(f"  [{DIM}]LSCO cutoff |coef| ≤ zeta, with Y rescaled to [-1, 1][/]")
 
     def _infer(dataset: Data, **kwargs: object) -> np.ndarray:
         """Run sparselink method on a pyGS Data object."""
         Y = dataset.data.Y  # type: ignore[union-attr]
+        if rescale:
+            Y = 2 * (Y - y_lo) / (y_hi - y_lo) - 1
         X = Y.T  # sparselink expects (samples × features)
         fit_P = None
         if use_P:
@@ -1583,7 +1640,10 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
 
     # Save adjacency
     if zeta is not None:
-        _save_nestboot_zeta(out, results, gene_names, zeta, matrix, ds._P, args.fdr)
+        _save_nestboot_zeta(
+            out, results, gene_names, zeta, matrix, ds._P, args.fdr,
+            kd_z=kd_z, failed=failed, dropouts_filled=n_dropouts,
+        )
         console.print(f"  [{DIM}]Adjacency saved to {out}[/]")
         console.print(f"  [{DIM}]Signed network saved to {out.with_name(out.stem + '_signed.npy')}[/]")
         console.print(f"  [{DIM}]Support saved to {out.with_name(out.stem + '_support.npz')}[/]")
@@ -1598,6 +1658,14 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
     # Export text summary
     txt_out = out.with_suffix(".txt")
     nb.export_results(results, txt_out)
+    with open(txt_out, "a") as handle:
+        handle.write(
+            f"\nPreprocessing: dropouts below {dropout_below} filled: "
+            f"{n_dropouts}; knockdowns removed (own-gene z > "
+            f"{max_knockdown_z}): {int(failed.sum())} "
+            f"[{', '.join(np.asarray(gene_names)[failed])}]; samples used: "
+            f"{n_samples}\n"
+        )
     console.print(f"  [{DIM}]Summary saved to {txt_out}[/]")
 
     if edges_path is not None:
@@ -2671,6 +2739,19 @@ def main() -> None:
         default=None,
         help="Write the tables for the sparsity nearest this zeta only. "
         "Default: every FDR-controlled sparsity, with a zeta column",
+    )
+    nb.add_argument(
+        "--dropout-below",
+        type=float,
+        default=None,
+        help="Treat values below this as dropouts; fill from replicates",
+    )
+    nb.add_argument(
+        "--max-knockdown-z",
+        type=float,
+        default=None,
+        help="Remove knockdowns whose own gene's robust z exceeds this "
+        "(0 removes knockdowns that did not lower their gene)",
     )
 
     # evaluate

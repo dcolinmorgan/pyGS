@@ -35,7 +35,7 @@ def test_knockdown_tsv_named_csv(tmp_path):
     assert X.shape == (4, 2)
     assert np.allclose(X, values.T)
     assert P.shape == (4, 2)
-    assert np.allclose(P, np.array([[1, 0], [1, 0], [0, 1], [0, 1]], dtype=float))
+    assert np.allclose(P, -np.array([[1, 0], [1, 0], [0, 1], [0, 1]], dtype=float))
 
 
 def test_replicate_suffix_name_dot_1():
@@ -45,8 +45,8 @@ def test_replicate_suffix_name_dot_1():
     genes = ["AATF", "ABCF1"]
     design = _perturbation_matrix(genes, ["AATF", "AATF.1", "ABCF1", "ABCF1.1"])
     assert design.shape == (2, 4)
-    assert design.sum(axis=1).tolist() == [2.0, 2.0]
-    assert design.sum(axis=0).tolist() == [1.0, 1.0, 1.0, 1.0]
+    assert design.sum(axis=1).tolist() == [-2.0, -2.0]
+    assert design.sum(axis=0).tolist() == [-1.0, -1.0, -1.0, -1.0]
 
 
 def test_file_url(tmp_path):

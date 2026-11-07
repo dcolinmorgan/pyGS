@@ -56,3 +56,29 @@ def test_zeta_run_writes_support_table_for_plot_support(tmp_path):
     loaded, archive, links = _plot_support().support_table(run)
     assert len(loaded) == 6
     assert archive is not None and links.shape == (2,)
+
+
+def test_dropout_and_failed_knockdown_flags(tmp_path):
+    rng = np.random.default_rng(0)
+    genes = ["G1", "G2", "G3", "G4"]
+    columns = [gene for gene in genes for _ in range(2)]
+    values = rng.normal(size=(4, 8))
+    for j, gene in enumerate(columns):
+        values[genes.index(gene), j] += 3.0 if gene == "G4" else -3.0
+    values[0, 2] = -50.0
+    data = tmp_path / "ymatrix.csv"
+    pd.DataFrame(values, index=genes, columns=columns).to_csv(data, sep="\t")
+    run = tmp_path / "run.npy"
+
+    cli._cmd_nestboot(argparse.Namespace(
+        file=str(data), method="lsco", nest_runs=3, boot_runs=4,
+        fdr=0.05, seed=1, zeta="0.01,0.1", output=str(run),
+        dropout_below=-10.0, max_knockdown_z=0.0,
+    ))
+
+    support = np.load(tmp_path / "run_support.npz")
+    assert support["failed_knockdowns"].tolist() == [False, False, False, True]
+    assert int(support["dropouts_filled"]) == 1
+    assert support["knockdown_z"][3] > 0 > support["knockdown_z"][:3].max()
+    summary = (tmp_path / "run.txt").read_text()
+    assert "knockdowns removed (own-gene z > 0.0): 1 [G4]; samples used: 6" in summary

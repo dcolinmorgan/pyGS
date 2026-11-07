@@ -50,7 +50,12 @@ def _base_label(name: object) -> str:
 def _perturbation_matrix(
     gene_names: list[str], column_labels: list[object]
 ) -> np.ndarray | None:
-    """Build genes × experiments P when columns are knockdown labels."""
+    """Build genes × experiments P when columns are knockdown labels.
+
+    Knockdowns are -1, GeneSPIDER's convention for Y = -A⁻¹P, so LSCO
+    (A = -P @ pinv(Y)) returns a negative diagonal and activations as
+    positive links.
+    """
     index = {name: i for i, name in enumerate(gene_names)}
     bases = [_base_label(label) for label in column_labels]
     if not bases or sum(base in index for base in bases) < 0.8 * len(bases):
@@ -59,7 +64,7 @@ def _perturbation_matrix(
     for j, base in enumerate(bases):
         i = index.get(base)
         if i is not None:
-            design[i, j] = 1.0
+            design[i, j] = -1.0
     if not np.any(design):
         return None
     return design
