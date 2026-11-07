@@ -2520,7 +2520,30 @@ def _parse_runs(text: str) -> tuple[int, int]:
     return outer, inner
 
 
+SKLEARN_DELAYED_WARNING = "`sklearn.utils.parallel.delayed` should be used with"
+
+
+def _drop_sklearn_delayed_warning() -> None:
+    """Never print sklearn's ``delayed`` warning.
+
+    Each sklearn parallel task runs ``warnings.resetwarnings()``, which on
+    Python < 3.14 clears the process-wide filter list. With NestBoot fitting
+    forests in many threads, other tasks then find no filters and print the
+    warning once per tree, whatever filters the CLI set. ``showwarning`` is
+    not reset, so the message is dropped there.
+    """
+    show = warnings.showwarning
+
+    def _show(message, category, filename, lineno, file=None, line=None):
+        if SKLEARN_DELAYED_WARNING in str(message):
+            return
+        show(message, category, filename, lineno, file, line)
+
+    warnings.showwarning = _show
+
+
 def main() -> None:
+    _drop_sklearn_delayed_warning()
     parser = argparse.ArgumentParser(
         prog="pygs",
         description="pyGS — gene regulatory network inference & benchmarking",

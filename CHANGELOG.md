@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pygs nestboot --zeta` writes `<output>_support.tsv` (links per outer run, outer-run overlap and shuffled/measured tail ratio for each sparsity and support bin), and `<output>_support.npz` now holds the per-run support histograms and the FDR curve, so `nestboot_report/plot_support.py` can draw support curves from a new run
 - `pygs nestboot --dropout-below V` fills values below V from the same knockdown's replicates, and `--max-knockdown-z Z` removes knockdowns whose own gene's robust z is above Z (0 removes knockdowns that did not lower their gene). The support archive records the knockdown z, the removed knockdowns and the dropout count, and the `.txt` summary gets a preprocessing line. `nestboot_report/run_100x100.sh` runs on `main` again
 
+### Fixed
+- `pygs` no longer prints sklearn's "`sklearn.utils.parallel.delayed` should be used with `sklearn.utils.parallel.Parallel`" warning once per tree when NestBoot fits genie3 in many threads. On Python < 3.14 each sklearn task clears the process-wide warning filters, so the CLI's ignore filter could not hold; the message is now dropped when printed
+
 ### Changed
 - Knockdown labels become -1 in P again, GeneSPIDER's convention for Y = -A⁻¹P, so LSCO returns a negative diagonal and activations as positive links. With +1, every link's sign was reversed, and NestBoot drew its bootstraps in a different order for the same seed
 - `pygs nestboot -m lsco --zeta` cuts |coefficient| ≤ zeta on Y rescaled to [-1, 1] over the whole matrix, GeneSPIDER's rawZeta rule and the rule behind `nestboot_report`. Before, the cutoff was on unscaled Y, so the same zeta gave a different network

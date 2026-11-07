@@ -295,3 +295,14 @@ def test_bench_rejects_data_and_snr_that_do_not_fit(monkeypatch, argv):
     monkeypatch.setattr("sys.argv", ["pygs", *argv])
     with pytest.raises(SystemExit):
         cli.main()
+
+
+def test_sklearn_delayed_warning_is_dropped_but_others_print(monkeypatch):
+    import warnings
+
+    shown = []
+    monkeypatch.setattr(warnings, "showwarning", lambda message, *rest: shown.append(str(message)))
+    cli._drop_sklearn_delayed_warning()
+    for text in (cli.SKLEARN_DELAYED_WARNING + " `sklearn.utils.parallel.Parallel`", "another warning"):
+        warnings.showwarning(UserWarning(text), UserWarning, "x.py", 1)
+    assert shown == ["another warning"]
