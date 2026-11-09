@@ -312,3 +312,50 @@ def test_sklearn_delayed_and_convergence_warnings_are_dropped_but_others_print(m
     ):
         warnings.showwarning(category(text), category, "x.py", 1)
     assert shown == ["another warning"]
+
+
+def _score_rows() -> list[dict]:
+    rows = []
+    for dataset, snr in (("d1", 0.01), ("d2", 1.0)):
+        for method, f1 in (("lasso", 0.5), ("nestboot lasso", 0.6), ("tigress", 0.4)):
+            for alpha, scale in ((0.1, 1.0), (0.01, 0.9)):
+                rows.append({
+                    "dataset": dataset, "network": "net", "method": method, "snr": snr,
+                    "topology": "random", "source": "stored", "alpha": alpha, "auroc": 0.7,
+                    "aupr": 0.5, "precision": 0.5, "recall": 0.5, "f1_score": f1 * scale,
+                    "fdr": 0.5, "mcc": f1 * scale, "r2": 0.0, "adjacency_file": "x.npz",
+                })
+    return rows
+
+
+@pytest.mark.parametrize("suffix", [".csv", ".json"])
+def test_show_prints_comparison_from_a_score_table(tmp_path, monkeypatch, suffix):
+    import pandas as pd
+
+    table = tmp_path / f"scores{suffix}"
+    if suffix == ".csv":
+        pd.DataFrame(_score_rows()).to_csv(table, index=False)
+    else:
+        table.write_text(json.dumps(_score_rows()))
+    printed = []
+    monkeypatch.setattr(cli, "_render_comparison", lambda summary, **kw: printed.append(summary))
+    cli._cmd_show(argparse.Namespace(file=str(table)))
+    (summary,) = printed
+    by_method = {(row["dataset_name"], row["method"]): row["f1"] for row in summary}
+    assert by_method == {
+        ("d1", "lasso"): 0.5, ("d1", "nestboot:lasso"): 0.6, ("d1", "tigress"): 0.4,
+        ("d2", "lasso"): 0.5, ("d2", "nestboot:lasso"): 0.6, ("d2", "tigress"): 0.4,
+    }
+
+
+def test_plot_redraw_prints_the_tables_too(tmp_path, monkeypatch):
+    import pandas as pd
+
+    pd.DataFrame(_score_rows()).to_csv(tmp_path / "fig.csv", index=False)
+    printed, drawn = [], []
+    monkeypatch.setattr(cli, "_render_comparison", lambda summary, **kw: printed.append(summary))
+    monkeypatch.setattr(cli, "_write_snr_figure", lambda table, figure: drawn.append((table, figure)))
+    monkeypatch.setattr("sys.argv", ["pygs", "bench", "--plot", "-o", str(tmp_path / "fig.png")])
+    cli.main()
+    assert len(printed) == 1 and len(printed[0]) == 6
+    assert drawn == [(tmp_path / "fig.csv", tmp_path / "fig.png")]

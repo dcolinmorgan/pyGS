@@ -712,11 +712,13 @@ def _replot_snr_figure(args: argparse.Namespace) -> None:
             "Run the benchmark first, then redraw with the same -o path."
         )
         raise SystemExit(1)
-    from bench.snr_benchmark import output_paths
+    from bench.snr_benchmark import load_scores, output_paths, render_scores
 
+    console.print()
+    render_scores(load_scores(table))
     figure = output_paths(output)["figure"]
     _write_snr_figure(table, figure)
-    console.print(f"  [{DIM}]Figure saved to {figure} from {table}[/]")
+    console.print(f"\n  [{DIM}]Figure saved to {figure} from {table}[/]")
 
 
 def _configure_snr_figure(simulate: bool = False) -> argparse.Namespace:
@@ -1881,10 +1883,13 @@ def _cmd_plot(args: argparse.Namespace) -> None:
 
 
 def _cmd_show(args: argparse.Namespace) -> None:
-    """Render a previous result JSON."""
-    with open(args.file) as f:
-        data = json.load(f)
-    if any(str(r.get("method", "")).startswith("nestboot:") for r in data):
+    """Render a previous result JSON, or a benchmark score table (.json or .csv)."""
+    from bench.snr_benchmark import is_score_table, load_scores, render_scores
+
+    data = load_scores(Path(args.file))
+    if is_score_table(data):
+        render_scores(data)
+    elif any(str(r.get("method", "")).startswith("nestboot:") for r in data):
         _render_comparison(data)
     else:
         _render_results(data, f"Results from {args.file}")
@@ -2830,8 +2835,10 @@ def main() -> None:
     )
 
     # show
-    sp = subs.add_parser("show", help="Render a previous result JSON")
-    sp.add_argument("file", help="Path to result JSON")
+    sp = subs.add_parser(
+        "show", help="Print the tables of a previous result: JSON, or a benchmark score table (.json or .csv)"
+    )
+    sp.add_argument("file", help="Result JSON, or the .csv/.json score table a benchmark run wrote")
 
     # dashboard
     dp = subs.add_parser(

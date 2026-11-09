@@ -331,6 +331,30 @@ def comparison_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return summary
 
 
+def load_scores(path: Path) -> list[dict[str, Any]]:
+    """Score table rows from the ``.csv`` or ``.json`` a benchmark run writes."""
+    if Path(path).suffix.lower() == ".csv":
+        return pd.read_csv(path).to_dict("records")
+    with open(path) as handle:
+        return json.load(handle)
+
+
+def is_score_table(rows: list[dict[str, Any]]) -> bool:
+    """One row per sparsity, as the benchmark writes, not a summary."""
+    return bool(rows) and "f1_score" in rows[0]
+
+
+def render_scores(rows: list[dict[str, Any]]) -> None:
+    """The tables a run prints at the end: direct vs NestBoot overall and per SNR."""
+    from bench.cli import _render_comparison, _render_results
+
+    summary = comparison_rows(rows)
+    if any(row["method"].startswith("nestboot:") for row in summary):
+        _render_comparison(summary)
+    else:
+        _render_results(summary, f"SNR benchmark ({len(summary)} runs)")
+
+
 def nestboot_stack(
     method_name: str,
     Y: np.ndarray,
@@ -637,8 +661,6 @@ def run_snr_benchmark(args: argparse.Namespace, simulate: bool = False) -> None:
         GREEN,
         ROSE,
         TEAL,
-        _render_comparison,
-        _render_results,
         _write_snr_figure,
         console,
     )
@@ -767,12 +789,8 @@ def run_snr_benchmark(args: argparse.Namespace, simulate: bool = False) -> None:
             _checkpoint(rows, csv_path, json_path)
 
     _checkpoint(rows, csv_path, json_path)
-    summary = comparison_rows(rows)
     console.print()
-    if any(row["method"].startswith("nestboot:") for row in summary):
-        _render_comparison(summary)
-    else:
-        _render_results(summary, f"SNR benchmark ({len(summary)} runs)")
+    render_scores(rows)
     console.print(f"\n  [{DIM}]Scores saved to {csv_path}[/]")
     console.print(f"  [{DIM}]Inferred networks saved to {run_dir}[/]")
     if getattr(args, "plot", False) or getattr(args, "figure", False):
