@@ -344,13 +344,17 @@ def is_score_table(rows: list[dict[str, Any]]) -> bool:
     return bool(rows) and "f1_score" in rows[0]
 
 
-def render_scores(rows: list[dict[str, Any]]) -> None:
+def render_scores(
+    rows: list[dict[str, Any]],
+    metrics: tuple[tuple[str, str, float, float], ...] | None = None,
+    wide: bool = False,
+) -> None:
     """The tables a run prints at the end: direct vs NestBoot overall and per SNR."""
-    from bench.cli import _render_comparison, _render_results
+    from bench.cli import COMPARISON_METRICS, _render_comparison, _render_results
 
     summary = comparison_rows(rows)
     if any(row["method"].startswith("nestboot:") for row in summary):
-        _render_comparison(summary)
+        _render_comparison(summary, metrics=metrics or COMPARISON_METRICS, wide=wide)
     else:
         _render_results(summary, f"SNR benchmark ({len(summary)} runs)")
 

@@ -359,3 +359,45 @@ def test_plot_redraw_prints_the_tables_too(tmp_path, monkeypatch):
     cli.main()
     assert len(printed) == 1 and len(printed[0]) == 6
     assert drawn == [(tmp_path / "fig.csv", tmp_path / "fig.png")]
+
+
+@pytest.mark.parametrize(
+    ("argv", "labels", "wide"),
+    [
+        ([], ["AUROC", "F1", "MCC"], False),
+        (["--metrics", "F1,", "mcc,", "auroc", "--wide"], ["F1", "MCC", "AUROC"], True),
+        (["--metrics", "mcc", "f1", "--slim"], ["MCC", "F1"], False),
+    ],
+)
+def test_show_picks_metrics_and_layout(tmp_path, monkeypatch, argv, labels, wide):
+    import pandas as pd
+
+    table = tmp_path / "scores.csv"
+    pd.DataFrame(_score_rows()).to_csv(table, index=False)
+    seen = []
+    monkeypatch.setattr(
+        cli, "_render_comparison",
+        lambda summary, metrics=cli.COMPARISON_METRICS, wide=False, **kw: seen.append(
+            ([entry[1] for entry in metrics], wide)
+        ),
+    )
+    monkeypatch.setattr("sys.argv", ["pygs", "show", str(table), *argv])
+    cli.main()
+    assert seen == [(labels, wide)]
+
+
+def test_show_rejects_unknown_metric(tmp_path, monkeypatch):
+    monkeypatch.setattr("sys.argv", ["pygs", "show", str(tmp_path / "x.csv"), "--metrics", "aupr"])
+    with pytest.raises(SystemExit):
+        cli.main()
+
+
+def test_wide_table_adds_a_bar_after_each_delta():
+    direct = [{"method": "lasso", "f1": 0.5, "mcc": 0.4}]
+    nestboot = [{"method": "nestboot:lasso", "f1": 0.6, "mcc": 0.3}]
+    metrics = cli._comparison_metrics("f1,mcc")
+    slim = cli._comparison_table(direct, nestboot, "t", "bold", metrics)
+    wide = cli._comparison_table(direct, nestboot, "t", "bold", metrics, wide=True)
+    assert len(wide.columns) == len(slim.columns) + 2
+    cells = [str(column._cells[0]) for column in wide.columns]
+    assert "█" * 12 in cells[4] and "▲ +0.100" in cells[3] and "▼ -0.100" in cells[7]

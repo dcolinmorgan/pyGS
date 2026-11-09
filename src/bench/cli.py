@@ -217,33 +217,58 @@ COMPARISON_METRICS: tuple[tuple[str, str, float, float], ...] = (
 )
 
 
-def _delta_cell(delta: float) -> str:
+def _comparison_metrics(names: str | None) -> tuple[tuple[str, str, float, float], ...]:
+    """``COMPARISON_METRICS`` entries for a comma list such as ``f1,mcc``, in that order."""
+    if not names:
+        return COMPARISON_METRICS
+    known = {key: entry for entry in COMPARISON_METRICS for key in (entry[0],)}
+    picked = [name.strip().lower() for name in names.split(",") if name.strip()]
+    unknown = [name for name in picked if name not in known]
+    if unknown or not picked:
+        raise ValueError(
+            f"Unknown metric {', '.join(unknown) or names!r}; choose from {', '.join(known)}"
+        )
+    return tuple(known[name] for name in dict.fromkeys(picked))
+
+
+def _delta_cell(delta: float, gap: str = "") -> str:
     if delta > 0.01:
-        return f"[{GREEN}]▲{delta:+.3f}[/]"
+        return f"[{GREEN}]▲{gap}{delta:+.3f}[/]"
     if delta < -0.01:
-        return f"[{ROSE}]▼{delta:+.3f}[/]"
-    return f"[{DIM}]={delta:+.3f}[/]"
+        return f"[{ROSE}]▼{gap}{delta:+.3f}[/]"
+    return f"[{DIM}]={gap}{delta:+.3f}[/]"
 
 
 def _comparison_table(
-    direct: list[dict[str, Any]], nestboot: list[dict[str, Any]], title: str, title_style: str
+    direct: list[dict[str, Any]],
+    nestboot: list[dict[str, Any]],
+    title: str,
+    title_style: str,
+    metrics: tuple[tuple[str, str, float, float], ...] = COMPARISON_METRICS,
+    wide: bool = False,
 ) -> Table:
     """Direct and NestBoot means with deltas for each metric, one row per method.
 
     Every direct method is listed. A method without NestBoot rows shows
-    "excluded" when it is in NESTBOOT_EXCLUDED and "—" otherwise.
+    "excluded" when it is in NESTBOOT_EXCLUDED and "—" otherwise. ``wide``
+    adds borders and a bar of the NestBoot value after each delta.
     """
     from bench.genespider import NESTBOOT_EXCLUDED
 
-    t = Table(
-        title=title, title_style=title_style, border_style="dim",
-        box=box.SIMPLE_HEAD, padding=(0, 0), pad_edge=False,
-    )
+    if wide:
+        t = Table(title=title, title_style=title_style, border_style="dim")
+    else:
+        t = Table(
+            title=title, title_style=title_style, border_style="dim",
+            box=box.SIMPLE_HEAD, padding=(0, 0), pad_edge=False,
+        )
     t.add_column("Method", style="bold", overflow="fold", min_width=10)
-    for index, (_, label, _, _) in enumerate(COMPARISON_METRICS):
+    for index, (_, label, _, _) in enumerate(metrics):
         t.add_column(f"{label}\ndir", justify="right", no_wrap=True, min_width=5)
         t.add_column(f"{label}\nNB", justify="right", no_wrap=True, min_width=8 if index == 0 else 5)
         t.add_column(f"Δ\n{label}", justify="right", no_wrap=True, min_width=7)
+        if wide:
+            t.add_column(f"{label}\nNB", no_wrap=True, min_width=20)
     t.add_column("Runs", justify="right", no_wrap=True, min_width=4)
 
     for method in sorted({r["method"] for r in direct}):
@@ -251,23 +276,33 @@ def _comparison_table(
         n_rows = [r for r in nestboot if r["method"] == f"nestboot:{method}"]
         missing = "excluded" if method in NESTBOOT_EXCLUDED else "—"
         cells = [method]
-        for key, _, lo, hi in COMPARISON_METRICS:
+        for key, _, lo, hi in metrics:
             d_mean = float(np.mean([r.get(key, 0) for r in d_rows]))
             cells.append(f"[{_color(d_mean, lo, hi)}]{d_mean:.3f}[/]")
             if n_rows:
                 n_mean = float(np.mean([r.get(key, 0) for r in n_rows]))
                 cells.append(f"[{_color(n_mean, lo, hi)}]{n_mean:.3f}[/]")
-                cells.append(_delta_cell(n_mean - d_mean))
+                cells.append(_delta_cell(n_mean - d_mean, " " if wide else ""))
+                if wide:
+                    cells.append(_bar(n_mean))
             else:
                 cells.extend([f"[{DIM}]{missing}[/]", f"[{DIM}]—[/]"])
+                if wide:
+                    cells.append("")
                 missing = "—"
         cells.append(f"{len(d_rows)}/{len(n_rows)}")
         t.add_row(*cells)
     return t
 
 
-def _render_comparison(data: list[dict], level_key: str = "snr", level_label: str = "SNR") -> None:
-    """Direct vs NestBoot tables, overall and per noise level, with Δ AUROC, Δ F1 and Δ MCC."""
+def _render_comparison(
+    data: list[dict],
+    level_key: str = "snr",
+    level_label: str = "SNR",
+    metrics: tuple[tuple[str, str, float, float], ...] = COMPARISON_METRICS,
+    wide: bool = False,
+) -> None:
+    """Direct vs NestBoot tables, overall and per noise level, with a Δ per metric."""
     from bench.genespider import NESTBOOT_EXCLUDED
 
     ok = [r for r in data if not r.get("error")]
@@ -280,8 +315,9 @@ def _render_comparison(data: list[dict], level_key: str = "snr", level_label: st
     if level_key == "snr" and all(r.get("snr_l") is not None for r in ok):
         level_key, level_label = "snr_l", "SNR_L"
 
-    console.print(_comparison_table(direct, nestboot, "Direct vs NestBoot", TEAL))
-    console.print(f"  [{DIM}]dir = direct, NB = NestBoot, Δ = NB minus direct, Runs = direct/NB.[/]")
+    console.print(_comparison_table(direct, nestboot, "Direct vs NestBoot", TEAL, metrics, wide))
+    bars = " Bars show the NestBoot value on 0 to 1." if wide else ""
+    console.print(f"  [{DIM}]dir = direct, NB = NestBoot, Δ = NB minus direct, Runs = direct/NB.{bars}[/]")
     for method in sorted({r["method"] for r in direct} & set(NESTBOOT_EXCLUDED)):
         console.print(f"  [{DIM}]{method}: not wrapped in NestBoot, {NESTBOOT_EXCLUDED[method]}[/]")
 
@@ -294,7 +330,9 @@ def _render_comparison(data: list[dict], level_key: str = "snr", level_label: st
                 continue
             console.print()
             shown = f"{level:g}" if isinstance(level, float) else level
-            console.print(_comparison_table(d_sub, n_sub, f"{level_label}={shown}", f"bold {ORANGE}"))
+            console.print(
+                _comparison_table(d_sub, n_sub, f"{level_label}={shown}", f"bold {ORANGE}", metrics, wide)
+            )
 
 
 # ── Status ────────────────────────────────────────────────────────────────
@@ -1886,11 +1924,20 @@ def _cmd_show(args: argparse.Namespace) -> None:
     """Render a previous result JSON, or a benchmark score table (.json or .csv)."""
     from bench.snr_benchmark import is_score_table, load_scores, render_scores
 
+    names = getattr(args, "metrics", None)
+    if isinstance(names, list):
+        names = ",".join(names).replace(" ", ",")
+    try:
+        metrics = _comparison_metrics(names)
+    except ValueError as exc:
+        console.print(f"  [{ROSE}]{exc}[/]")
+        raise SystemExit(2)
+    wide = bool(getattr(args, "wide", False))
     data = load_scores(Path(args.file))
     if is_score_table(data):
-        render_scores(data)
+        render_scores(data, metrics=metrics, wide=wide)
     elif any(str(r.get("method", "")).startswith("nestboot:") for r in data):
-        _render_comparison(data)
+        _render_comparison(data, metrics=metrics, wide=wide)
     else:
         _render_results(data, f"Results from {args.file}")
 
@@ -2839,6 +2886,16 @@ def main() -> None:
         "show", help="Print the tables of a previous result: JSON, or a benchmark score table (.json or .csv)"
     )
     sp.add_argument("file", help="Result JSON, or the .csv/.json score table a benchmark run wrote")
+    sp.add_argument(
+        "--metrics", nargs="+", default=None,
+        help="In display order, separated by commas or spaces: auroc, f1, mcc (default all three)",
+    )
+    layout = sp.add_mutually_exclusive_group()
+    layout.add_argument(
+        "--wide", action="store_true",
+        help="Bordered tables with a bar of the NestBoot value after each delta",
+    )
+    layout.add_argument("--slim", action="store_true", help="Compact tables without bars (default)")
 
     # dashboard
     dp = subs.add_parser(
