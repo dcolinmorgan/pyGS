@@ -742,7 +742,7 @@ def _saved_snr_table(output: Path) -> Path | None:
 
 
 def _replot_snr_figure(args: argparse.Namespace) -> None:
-    """Redraw the boxplot from a score table. Does not infer."""
+    """Redraw the figure from a score table. Does not infer."""
     output = Path(args.output)
     table = _saved_snr_table(output)
     if table is None:
@@ -813,7 +813,7 @@ def _configure_snr_figure(simulate: bool = False) -> argparse.Namespace:
         default="y",
     )
     plot = Prompt.ask(
-        f"  [{DIM}]Write the boxplot when the run finishes?[/]",
+        f"  [{DIM}]Write the direct vs NestBoot figure when the run finishes?[/]",
         choices=["y", "n"],
         default="y",
     )
@@ -1054,7 +1054,7 @@ def _configure_genespider() -> argparse.Namespace:
         f"  [{DIM}]Output file[/]", default="benchmark_genespider.json"
     )
     figure = Prompt.ask(
-        f"  [{DIM}]Write the boxplot when the run finishes?[/]",
+        f"  [{DIM}]Write the direct vs NestBoot figure when the run finishes?[/]",
         choices=["y", "n"],
         default="y",
     )
@@ -2716,7 +2716,7 @@ def main() -> None:
         parser.add_argument("--fdr", type=float, default=0.05)
         parser.add_argument(
             "--plot", action="store_true",
-            help="Write the boxplot when the run finishes. With no run options, redraw it from the saved table at -o",
+            help="Write the direct vs NestBoot figure when the run finishes. With no run options, redraw it from the saved table at -o",
         )
         stored = parser.add_argument_group("stored data")
         stored.add_argument(

@@ -222,15 +222,17 @@ def test_plot_splits_each_method_into_direct_and_nestboot(tmp_path):
     plotter = _plotter()
     import pandas as pd
 
-    long = pd.DataFrame({"method": ["ridge", "nestboot ridge", "tigress"], "score": [0.5, 0.6, 0.4]})
+    long = pd.DataFrame({
+        "method": ["ridge", "nestboot ridge", "tigress", "random tigress"], "score": [0.5, 0.6, 0.4, 0.1],
+    })
     split = plotter.split_runs(long)
-    assert list(split["base"]) == ["ridge", "ridge", "tigress"]
-    assert list(split["run"]) == ["direct", "NestBoot", "direct"]
+    assert list(split["base"]) == ["ridge", "ridge", "tigress", "tigress"]
+    assert list(split["run"]) == ["direct", "NestBoot", "direct", "shuffled"]
 
     rows = [
         {**_row(method), "snr_l": snr, "dataset_name": f"d{k}-{snr}", "auroc": 0.5 + 0.1 * k}
         for snr in (0.01, 1.0) for k in range(3)
-        for method in ("ridge", "nestboot:ridge", "tigress")
+        for method in ("ridge", "nestboot:ridge", "tigress", "random tigress")
     ]
     table = tmp_path / "rows.json"
     table.write_text(json.dumps(rows))
@@ -401,3 +403,22 @@ def test_wide_table_adds_a_bar_after_each_delta():
     assert len(wide.columns) == len(slim.columns) + 2
     cells = [str(column._cells[0]) for column in wide.columns]
     assert "█" * 12 in cells[4] and "▲ +0.100" in cells[3] and "▼ -0.100" in cells[7]
+
+
+def test_paired_plot_draws_methods_with_one_direct_network(tmp_path):
+    plotter = _plotter()
+    rows = []
+    for snr in (0.01, 1.0):
+        for k in range(4):
+            dataset = f"net{k}-SNR{snr}"
+            rows.append({**_row("clr"), "snr_l": snr, "dataset": dataset, "alpha": None})
+            for a in (0.1, 0.2):
+                rows.append({**_row("nestboot:clr"), "snr_l": snr, "dataset": dataset, "alpha": a, "f1_score": a})
+                for method in ("lasso", "nestboot:lasso"):
+                    rows.append({**_row(method), "snr_l": snr, "dataset": dataset, "alpha": a})
+    table = tmp_path / "paired.json"
+    table.write_text(json.dumps(rows))
+    frame = plotter.load_scores(table)
+    figure = tmp_path / "paired.png"
+    plotter.plot_scores(frame, figure)
+    assert figure.stat().st_size > 0

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot the SNR benchmark table as boxplots.
+"""Plot the SNR benchmark table as paired direct vs NestBoot violins.
 
 Reads the CSV written by ``pygs bench``. A row may be one regularization
 setting. AUROC is the threshold-free score of the setting with the best F1.
@@ -11,10 +11,9 @@ SNR is read from an ``snr_l`` column when every row has one, else from
 ``snr`` or from names such as ``SNR0.01-...``. ``pygs bench --data stored`` JSON
 records the filename SNR in ``snr`` and SNR_L in ``snr_l``.
 
-The chapter figure also includes randomized TIGRESS, LASSO and LSCO. Those
-rows are not in the stored CSVs, and they cannot be recovered from the image.
-If a later run adds them, name the methods ``random tigress``, ``random lasso``
-and ``random lsco`` and this script will include them.
+Methods named ``nestboot <method>`` are the NestBoot half of ``<method>``, and
+``random <method>`` rows (gene-wise shuffled expression) are drawn as that
+method's shuffled-data median.
 """
 
 from __future__ import annotations
@@ -23,26 +22,9 @@ import argparse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
-import seaborn as sns
 from matplotlib.patches import Patch
-
-METHOD_ORDER = [
-    "tigress",
-    "random tigress",
-    "lasso",
-    "random lasso",
-    "nestboot lasso",
-    "lsco",
-    "random lsco",
-    "nestboot lsco",
-]
-SNR_ORDER = ["0.01", "0.1", "1"]
-METRICS = [
-    ("auroc", "AUROC"),
-    ("f1", "maxF1"),
-    ("mcc", "maxMCC"),
-]
 
 
 def _snr_label(value: str) -> str:
@@ -99,102 +81,122 @@ def collapse_sparsity(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 RUNS = ["direct", "NestBoot"]
-RUN_COLORS = {"direct": "#9CB4D8", "NestBoot": "#E8833A"}
+RUN_COLORS = {"direct": "#4C78A8", "NestBoot": "#E8833A"}
+SHUFFLED_COLOR = "0.35"
+PAIRED_METRICS = [("auroc", "AUROC", 0.5), ("f1", "max F1", None), ("mcc", "max MCC", 0.0)]
 
 
 def split_runs(long: pd.DataFrame) -> pd.DataFrame:
-    """Base method and run ("direct" or "NestBoot") from names such as ``nestboot lsco``."""
-    nested = long["method"].str.startswith("nestboot ")
-    return long.assign(
-        base=long["method"].str.removeprefix("nestboot "),
-        run=nested.map({True: "NestBoot", False: "direct"}),
-    )
+    """Base method and run from names such as ``nestboot lsco`` or ``random lsco``.
 
-
-def plot_split(long: pd.DataFrame, snrs: list[str], output: Path) -> None:
-    """One split violin per method: direct on one half, NestBoot on the other.
-
-    Rows are metrics and columns SNR levels, so the figure grows downward with
-    the number of methods. Methods never run through NestBoot, such as
-    TIGRESS, have only the direct half. Each run is also drawn as a point,
-    because a violin needs several networks to show a distribution.
+    The run is "direct", "NestBoot", or "shuffled" for ``random`` rows.
     """
-    long = split_runs(long)
-    bases = sorted(set(long["base"]))
-    sns.set_theme(style="whitegrid", context="notebook")
-    grid = sns.FacetGrid(
-        long,
-        row="metric",
-        col="snr",
-        row_order=[label for _, label in METRICS],
-        col_order=snrs,
-        height=0.42 * len(bases) + 1.0,
-        aspect=0.85,
-        sharex=True,
-        sharey=True,
-    )
-    common = dict(x="score", y="base", hue="run", order=bases, hue_order=RUNS, palette=RUN_COLORS, legend=False)
-    grid.map_dataframe(
-        sns.violinplot, split=True, cut=0, inner="quart", density_norm="width", linewidth=0.8, **common
-    )
-    grid.map_dataframe(
-        sns.stripplot, dodge=True, jitter=0.08, size=3.5, edgecolor="black", linewidth=0.4, **common
-    )
-    grid.set_titles(row_template="{row_name}", col_template="SNR_L = {col_name}")
-    grid.set_axis_labels("Score", "")
-    grid.set(xlim=(-0.05, 1.05))
-    handles = [Patch(facecolor=RUN_COLORS[run], edgecolor="black", label=run) for run in RUNS]
-    grid.figure.legend(handles=handles, loc="upper center", ncol=2, frameon=False, bbox_to_anchor=(0.5, 1.0))
-    grid.figure.suptitle("Direct inference and NestBoot on GeneSPIDER networks", y=1.03)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    grid.savefig(output, dpi=200, bbox_inches="tight")
-    plt.close(grid.figure)
+    shuffled = long["method"].str.startswith("random ")
+    base = long["method"].str.removeprefix("random ")
+    nested = base.str.startswith("nestboot ")
+    run = np.where(shuffled, "shuffled", np.where(nested, "NestBoot", "direct"))
+    return long.assign(base=base.str.removeprefix("nestboot "), run=run)
+
+
+def plot_split(frame: pd.DataFrame, snrs: list[str], output: Path) -> None:
+    """Direct and NestBoot scores per method as paired half violins.
+
+    Rows are AUROC, max F1 and max MCC; columns are SNR_L levels. The left
+    half is the direct run and the right half NestBoot, each network a point,
+    with a grey line joining a network's two scores when the table names its
+    dataset. The number above each method is the median paired change
+    (NestBoot minus direct). A dashed line across a method is its median on
+    shuffled expression. Methods are in alphabetical order.
+    """
+    frame = split_runs(frame)
+    paired = "dataset" in frame.columns
+    bases = sorted(set(frame["base"]))
+    rows, cols = len(PAIRED_METRICS), len(snrs)
+    with plt.rc_context({"font.size": 12, "axes.titlesize": 14, "axes.labelsize": 14}):
+        fig, axes = plt.subplots(
+            rows, cols, figsize=(1.0 + max(0.62 * len(bases), 2.6) * cols, 3.3 * rows + 1.4),
+            sharex=True, sharey="row", squeeze=False,
+        )
+        rng = np.random.default_rng(0)
+        for r, (key, label, reference) in enumerate(PAIRED_METRICS):
+            for c, snr in enumerate(snrs):
+                ax = axes[r, c]
+                part = frame[frame["snr"] == snr]
+                for i, base in enumerate(bases):
+                    runs = {run: part[(part["base"] == base) & (part["run"] == run)] for run in RUNS}
+                    shuffled = part[(part["base"] == base) & (part["run"] == "shuffled")][key].dropna()
+                    if len(shuffled):
+                        level = float(np.median(shuffled))
+                        ax.plot([i - 0.4, i + 0.4], [level, level], color=SHUFFLED_COLOR, ls="--", lw=1.4,
+                                zorder=4)
+                    for run, side, shift in (("direct", "low", -1), ("NestBoot", "high", 1)):
+                        values = runs[run][key].dropna().to_numpy(dtype=float)
+                        if len(values) == 0:
+                            continue
+                        if len(values) > 1 and np.ptp(values) > 0:
+                            body = ax.violinplot(values, positions=[i], side=side, widths=0.8,
+                                                 showextrema=False)["bodies"][0]
+                            body.set_facecolor(RUN_COLORS[run])
+                            body.set_edgecolor("none")
+                            body.set_alpha(0.35)
+                        median = float(np.median(values))
+                        ax.plot([i, i + shift * 0.36], [median, median], color=RUN_COLORS[run], lw=2.4,
+                                solid_capstyle="butt", zorder=4)
+                    if paired and len(runs["direct"]) and len(runs["NestBoot"]):
+                        both = runs["direct"].merge(runs["NestBoot"], on="dataset", suffixes=("_d", "_n"))
+                        x_d = i - 0.17 + rng.uniform(-0.04, 0.04, len(both))
+                        x_n = i + 0.17 + rng.uniform(-0.04, 0.04, len(both))
+                        for xd, xn, yd, yn in zip(x_d, x_n, both[f"{key}_d"], both[f"{key}_n"]):
+                            ax.plot([xd, xn], [yd, yn], color="0.55", lw=0.6, alpha=0.6, zorder=2)
+                        ax.scatter(x_d, both[f"{key}_d"], s=14, color=RUN_COLORS["direct"], edgecolor="white",
+                                   linewidth=0.4, zorder=3)
+                        ax.scatter(x_n, both[f"{key}_n"], s=14, color=RUN_COLORS["NestBoot"], edgecolor="white",
+                                   linewidth=0.4, zorder=3)
+                        change = float(np.median(both[f"{key}_n"] - both[f"{key}_d"]))
+                        color = "#2e7d32" if change > 0.01 else "#c62828" if change < -0.01 else "0.45"
+                        ax.text(i, 1.015, f"{change:+.2f}", transform=ax.get_xaxis_transform(), ha="center",
+                                va="bottom", fontsize=9, color=color)
+                    else:
+                        for run, shift in (("direct", -0.17), ("NestBoot", 0.17)):
+                            values = runs[run][key].dropna()
+                            ax.scatter(i + shift + rng.uniform(-0.04, 0.04, len(values)), values, s=14,
+                                       color=RUN_COLORS[run], edgecolor="white", linewidth=0.4, zorder=3)
+                if reference is not None:
+                    ax.axhline(reference, color="0.6", ls="--", lw=0.9, zorder=1)
+                ax.grid(axis="y", color="0.9", lw=0.8)
+                ax.set_axisbelow(True)
+                for spine in ("top", "right"):
+                    ax.spines[spine].set_visible(False)
+                if r == 0:
+                    ax.set_title(f"SNR$_L$ = {snr}", pad=18)
+                if c == 0:
+                    ax.set_ylabel(label)
+        for ax in axes[-1]:
+            ax.set_xticks(range(len(bases)))
+            ax.set_xticklabels(bases, rotation=40, ha="right")
+            ax.set_xlim(-0.6, len(bases) - 0.4)
+        for r, (key, _, _) in enumerate(PAIRED_METRICS):
+            low = float(np.nanmin(frame[key]))
+            axes[r, 0].set_ylim(min(low - 0.05, 0.0 if key != "auroc" else low - 0.05), 1.02)
+        handles = [Patch(facecolor=RUN_COLORS[run], alpha=0.6, label=run) for run in RUNS]
+        if paired:
+            handles.append(plt.Line2D([], [], color="0.55", lw=0.8, label="same network"))
+        if (frame["run"] == "shuffled").any():
+            handles.append(plt.Line2D([], [], color=SHUFFLED_COLOR, ls="--", lw=1.4, label="shuffled data: median"))
+        fig.legend(handles=handles, loc="upper center", ncol=len(handles), frameon=False,
+                   bbox_to_anchor=(0.5, 1.0))
+        fig.text(0.01, 0.005, "Numbers: median paired change, NestBoot minus direct.", fontsize=10,
+                 color="0.35", ha="left", va="bottom")
+        fig.tight_layout(rect=(0, 0.035, 1, 0.95))
+        output.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output, dpi=200)
+        plt.close(fig)
 
 
 def plot_scores(frame: pd.DataFrame, output: Path) -> None:
     frame = collapse_sparsity(frame)
-    long = frame.melt(
-        id_vars=["method", "snr"],
-        value_vars=["auroc", "f1", "mcc"],
-        var_name="metric",
-        value_name="score",
-    )
-    long["metric"] = long["metric"].map(dict(METRICS))
-    methods = set(long["method"])
-    snrs = [snr for snr in SNR_ORDER if snr in set(long["snr"])]
-    snrs.extend(sorted(set(long["snr"]) - set(snrs), key=float))
-    if not methods <= set(METHOD_ORDER):
-        plot_split(long, snrs, output)
-        return
-    present = [method for method in METHOD_ORDER if method in methods]
-
-    sns.set_theme(style="whitegrid", context="talk")
-    grid = sns.catplot(
-        data=long,
-        x="metric",
-        y="score",
-        hue="method",
-        row="snr",
-        row_order=snrs,
-        kind="box",
-        hue_order=present,
-        order=[label for _, label in METRICS],
-        height=3.4,
-        aspect=2.4,
-        sharey=True,
-        fliersize=3,
-        legend_out=True,
-    )
-    grid.set_axis_labels("Metric", "Score")
-    grid.set_titles("SNR = {row_name}")
-    grid.set(ylim=(-0.05, 1.05))
-    grid.figure.suptitle(
-        "TIGRESS, LASSO and LSCO, with and without NestBoot",
-        y=1.02,
-    )
-    output.parent.mkdir(parents=True, exist_ok=True)
-    grid.savefig(output, dpi=200, bbox_inches="tight")
-    plt.close(grid.figure)
+    snrs = sorted(set(frame["snr"]), key=float)
+    plot_split(frame, snrs, output)
 
 
 def main() -> None:

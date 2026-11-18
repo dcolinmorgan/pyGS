@@ -310,7 +310,7 @@ def comparison_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """One row per (dataset, method), in the form the TUI comparison table reads.
 
     AUROC and F1 come from the sparsity with the best F1 and MCC is the best
-    over sparsities, as in the boxplot.
+    over sparsities, as in the figure.
     """
     if not rows:
         return []
