@@ -1155,6 +1155,7 @@ class Nestboot:
         n_outer: int,
         n_inner: int,
         fdr: float,
+        mask: np.ndarray | None = None,
     ) -> NetworkResults:
         """Cutoff and networks from per-outer-run support, as GeneSPIDER's NB_FDR.
 
@@ -1168,6 +1169,9 @@ class Nestboot:
             n_outer: Number of outer runs
             n_inner: Number of inner bootstraps per outer run
             fdr: False discovery rate threshold
+            mask: Links that may be kept, shape of ``total`` without slices.
+                Default: every off-diagonal link. Arrays shaped (links, 1,
+                slices) with a (links, 1) mask score an edge list
 
         Returns:
             NetworkResults with xnet the intersection over outer runs at the cutoff
@@ -1177,7 +1181,7 @@ class Nestboot:
         n_genes, _, n_slices = total.shape
         n_bins = n_outer
         to_bin = support_bins(n_inner, n_outer)
-        offdiag = ~np.eye(n_genes, dtype=bool)
+        offdiag = ~np.eye(n_genes, dtype=bool) if mask is None else np.asarray(mask, dtype=bool)
         mean_support = total / (n_outer * n_inner)
         sign = np.where(2 * positive >= total, 1.0, -1.0)
         sign[total == 0] = 0.0
