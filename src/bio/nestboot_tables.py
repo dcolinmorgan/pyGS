@@ -43,15 +43,35 @@ def _cut_to_per_gene(
     return kept
 
 
+def _core(present: np.ndarray, weight: np.ndarray, genes: int, links: int | None) -> np.ndarray:
+    """Of the links among the ``genes`` genes with the most links, the ``links`` highest-weight ones."""
+    degree = present.sum(axis=0) + present.sum(axis=1)
+    chosen = np.zeros(len(degree), dtype=bool)
+    chosen[np.argsort(-degree, kind="stable")[:genes]] = True
+    kept = present & chosen[:, None] & chosen[None, :]
+    if links is None:
+        return kept
+    target, regulator = np.nonzero(kept)
+    order = np.argsort(-weight[target, regulator], kind="stable")[:links]
+    top = np.zeros(present.shape, dtype=bool)
+    top[target[order], regulator[order]] = True
+    return top
+
+
 def nestboot_tables(
     run: Path,
     zeta: float,
     per_gene: float | None = 3.0,
+    top_genes: int | None = None,
+    top_links: int | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Edges and nodes for the sparsity nearest ``zeta``.
 
     ``per_gene`` keeps the highest-support links until the density is nearest
     that many links per connected gene. ``None`` keeps the full FDR network.
+    ``top_genes`` replaces that cut: only the ``top_genes`` genes with the most FDR
+    links are kept, and of the links among them, the ``top_links`` with the
+    highest support.
     """
     run = Path(run)
     support_path = run.with_name(run.stem + "_support.npz")
@@ -67,7 +87,9 @@ def nestboot_tables(
     index = int(np.argmin(np.abs(np.log(support["zetavec"] / zeta))))
     genes = np.asarray(support["genes"]).astype(str)
     present = binary[:, :, index]
-    if per_gene:
+    if top_genes:
+        present = _core(present, support["mean_support"][:, :, index], top_genes, top_links)
+    elif per_gene:
         present = _cut_to_per_gene(present, support["mean_support"][:, :, index], per_gene)
 
     target, regulator = np.nonzero(present)

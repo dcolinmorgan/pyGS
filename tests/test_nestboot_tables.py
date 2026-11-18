@@ -94,3 +94,34 @@ def test_nestboot_output_names_tables_and_arrays(tmp_path):
     assert _nestboot_outputs("edges.tsv", "nodes.tsv")[2] == Path("nodes.tsv")
     with pytest.raises(ValueError):
         _nestboot_outputs("out.npy", "nodes.tsv")
+
+
+def test_core_keeps_the_best_connected_genes_then_the_strongest_links(tmp_path):
+    genes = np.array(["A", "B", "C", "D"])
+    binary = np.zeros((4, 4, 1))
+    mean = np.zeros((4, 4, 1))
+    # A has 3 links, B and C 2, D 1. D→A has the highest support but D is left out.
+    for target, regulator, weight in ((1, 0, 0.6), (2, 0, 0.7), (1, 2, 0.8), (0, 3, 0.99)):
+        binary[target, regulator, 0] = 1
+        mean[target, regulator, 0] = weight
+    run = tmp_path / "out.npy"
+    np.save(run, binary)
+    np.save(tmp_path / "out_signed.npy", mean)
+    np.savez(
+        tmp_path / "out_support.npz",
+        zetavec=np.array([0.1]),
+        support_cutoff=np.array([0.5]),
+        fdr_reached=np.array([True]),
+        mean_support=mean,
+        min_support=mean,
+        genes=genes,
+        knockdown_z=np.zeros(4),
+        failed_knockdowns=np.zeros(4, dtype=bool),
+    )
+
+    edges, nodes, _ = nestboot_tables(run, zeta=0.1, top_genes=3)
+    assert set(zip(edges.regulator, edges.target)) == {("A", "B"), ("A", "C"), ("C", "B")}
+
+    edges, nodes, _ = nestboot_tables(run, zeta=0.1, top_genes=3, top_links=2)
+    assert set(zip(edges.regulator, edges.target)) == {("C", "B"), ("A", "C")}
+    assert set(nodes["gene"]) == {"A", "B", "C"}

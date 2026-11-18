@@ -25,6 +25,7 @@ Usage::
     pygs bench-gs ...                            # same as pygs bench --data stored
     pygs nestboot data.csv -m lsco --nest-runs 100 --boot-runs 100 --zeta=-4:0:41 --output out.npy
     pygs plot out.npy --zeta 0.063 --per-gene 3 -o edges.csv
+    pygs plot out.npy --zeta 0.063 --top-genes 170 --top-links 510 -o edges.csv
     pygs nestboot --runs 100x100 -m lsco -f data.csv --output out.npy
     pygs evaluate pred.npy --gold gold.npy       # evaluate against gold standard
     pygs plot pred.npy --genes genes.txt         # plot a GRN
@@ -1797,13 +1798,20 @@ def _cmd_plot_nestboot(args: argparse.Namespace) -> None:
 
     run = Path(args.adjacency)
     per_gene = None if args.per_gene == 0 else args.per_gene
+    core = getattr(args, "top_genes", None)
+    top_links = getattr(args, "top_links", None)
     try:
-        edges, nodes, info = nestboot_tables(run, args.zeta, per_gene)
+        edges, nodes, info = nestboot_tables(
+            run, args.zeta, per_gene, top_genes=core, top_links=top_links
+        )
     except FileNotFoundError as exc:
         console.print(f"  [{ROSE}]{exc}[/]")
         raise SystemExit(1)
 
-    suffix = "_3pergene" if per_gene else ""
+    if core:
+        suffix = f"_{core}genes" + (f"_{top_links}links" if top_links else "")
+    else:
+        suffix = "_3pergene" if per_gene else ""
     if args.output and Path(args.output).suffix.lower() in (".csv", ".tsv", ".txt"):
         edges_path = Path(args.output)
         nodes_path = nodes_path_for(edges_path)
@@ -1827,7 +1835,7 @@ def _cmd_plot_nestboot(args: argparse.Namespace) -> None:
         import os
         import graphistry
     except ImportError:
-        console.print("  [{ROSE}]graphistry is not installed. Tables were written.[/]")
+        console.print(f"  [{ROSE}]graphistry is not installed. Tables were written.[/]")
         raise SystemExit(1)
     server = os.environ.get("GRAPHISTRY_SERVER", "hub.graphistry.com")
     if os.environ.get("GRAPHISTRY_PERSONAL_KEY_ID"):
@@ -1847,24 +1855,30 @@ def _cmd_plot_nestboot(args: argparse.Namespace) -> None:
         )
     else:
         console.print(
-            "  [{ROSE}]Set GRAPHISTRY_USERNAME or GRAPHISTRY_PERSONAL_KEY_ID. Tables were written.[/]"
+            f"  [{ROSE}]Set GRAPHISTRY_USERNAME or GRAPHISTRY_PERSONAL_KEY_ID. Tables were written.[/]"
         )
         raise SystemExit(1)
+    nodes = nodes.assign(
+        degree=nodes["in_degree"] + nodes["out_degree"], color=np.int64(0xA6CEE3FF)
+    )
     url = (
         graphistry.edges(edges, "regulator", "target")
         .nodes(nodes, "gene")
-        .bind(point_title="gene", edge_title="title")
+        .bind(point_title="gene", edge_title="title", point_size="degree", point_color="color")
         .encode_edge_color(
             "sign",
             categorical_mapping={"activation": "#2e7d32", "repression": "#c62828"},
         )
-        .encode_point_color(
-            "knockdown",
-            categorical_mapping={"ok": "#1f5aa6", "failed (removed)": "#f39c12"},
-        )
-        .encode_point_size("out_degree")
+        .settings(url_params={
+            "showLabels": False, "edgeCurvature": 0, "edgeOpacity": 1.0,
+            "pointSize": 0.25, "pointStrokeWidth": 10,
+        })
+        .addStyle(bg={"color": "#FFFFFF"})
         .plot(render="url")
     )
+    links = set(zip(edges["regulator"], edges["target"]))
+    reciprocal = sum((target, regulator) in links for regulator, target in links) // 2
+    console.print(f"  [{DIM}]{len(edges)} links drawn, {reciprocal} reciprocal pairs[/]")
     console.print(f"  [{TEAL}]{url}[/]")
 
 
@@ -2875,6 +2889,14 @@ def main() -> None:
     pp.add_argument(
         "--per-gene", type=float, default=3.0,
         help="With --zeta, keep the highest-support links nearest this density. 0 keeps the full FDR network",
+    )
+    pp.add_argument(
+        "--top-genes", type=int, default=None,
+        help="With --zeta, keep only this many genes, those with the most FDR links. Replaces --per-gene",
+    )
+    pp.add_argument(
+        "--top-links", type=int, default=None,
+        help="With --top-genes, keep this many highest-support links among those genes",
     )
     pp.add_argument(
         "--graphistry", action="store_true",
