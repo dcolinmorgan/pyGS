@@ -34,7 +34,19 @@ def support_table(path: Path) -> tuple[pd.DataFrame, dict | None, np.ndarray | N
         archive = dict(np.load(path.with_name(path.stem + "_support.npz")))
         links = (np.load(path) != 0).sum(axis=(0, 1))
         return table, archive, links
-    return pd.read_csv(path, sep="\t"), None, None
+    table = pd.read_csv(path, sep="\t")
+    beside = path.with_suffix(".npz")
+    if not (path.stem.endswith("_support") and beside.exists()):
+        return table, None, None
+    archive = dict(np.load(beside))
+    run = path.with_name(path.stem.removesuffix("_support") + ".npy")
+    if "links" in archive:
+        links = archive["links"]
+    elif run.exists():
+        links = (np.load(run) != 0).sum(axis=(0, 1))
+    else:
+        links = None
+    return table, archive, links
 
 
 def _slice(table: pd.DataFrame, zeta: float, archive: dict | None, links: np.ndarray | None):
@@ -87,53 +99,139 @@ def _draw(
     return right
 
 
+def _axes_points(ax: plt.Axes, lines: list) -> np.ndarray:
+    """Points along every line in ``ax``'s axes fraction, dense enough to catch crossings."""
+    to_axes = ax.transAxes.inverted()
+    blocks = []
+    for line in lines:
+        xy = np.asarray(line.get_xydata(), dtype=float)
+        xy = xy[np.isfinite(xy).all(axis=1)]
+        if len(xy) == 0:
+            continue
+        pts = (line.get_transform() + to_axes).transform(xy)
+        if len(pts) > 1:
+            steps = np.linspace(0, 1, 20)[:, None, None]
+            pts = (pts[:-1] + steps * (pts[1:] - pts[:-1])).reshape(-1, 2)
+        blocks.append(pts)
+    return np.vstack(blocks) if blocks else np.empty((0, 2))
+
+
+def _free_box(points: np.ndarray, size: float, pad: tuple[float, float, float, float]) -> tuple[int, float, float]:
+    """Lines crossed and lower-left corner of the clearest size x size box.
+
+    ``pad`` (left, right, bottom, top) reserves room for the box's own tick
+    labels. Ties go to the higher box, then to the one nearer the middle.
+    """
+    left, right, bottom, top = pad
+    best = None
+    for y0 in np.linspace(bottom, 1 - size - top, 30):
+        for x0 in np.linspace(left, 1 - size - right, 40):
+            hits = int(np.count_nonzero(
+                (points[:, 0] > x0 - left) & (points[:, 0] < x0 + size + right)
+                & (points[:, 1] > y0 - bottom) & (points[:, 1] < y0 + size + top)
+            ))
+            score = (hits, -y0, abs(x0 + size / 2 - 0.5))
+            if best is None or score < best[0]:
+                best = (score, x0, y0)
+    return best[0][0], best[1], best[2]
+
+
+SINGLE_STYLE = {
+    "font.size": 15,
+    "axes.labelsize": 18,
+    "xtick.labelsize": 15,
+    "ytick.labelsize": 15,
+    "legend.fontsize": 14,
+}
+ZOOMED = "0.86"
+
+
+def _plot_single(table, zeta, output: Path, archive, links, inset: bool = True) -> None:
+    """One sparsity, with an inset showing the full frequency range unless ``inset`` is False.
+
+    The inset has the main panel's aspect ratio and sits where it crosses the
+    fewest lines; grey marks the frequency range the main panel zooms into.
+    The legend is above the panel.
+    """
+    from matplotlib.patches import Patch
+
+    with plt.rc_context(SINGLE_STYLE):
+        fig, ax = plt.subplots(figsize=(11, 8.2))
+        fig.subplots_adjust(left=0.09, right=0.90, bottom=0.10, top=0.84)
+        chosen, part, cutoff, reached, n_links = _slice(table, zeta, archive, links)
+        freq = _draw(ax, part, cutoff, reached, label_cutoff=True)
+        for line in ax.get_lines() + freq.get_lines():
+            line.set_linewidth(2.2)
+        ax.set_xlabel("support")
+        ax.set_ylabel("overlap")
+        freq.set_ylabel("frequency")
+        fig.canvas.draw()
+
+        if inset:
+            points = _axes_points(ax, ax.get_lines() + freq.get_lines())
+            pad = (0.075, 0.085, 0.10, 0.02)
+            found = None
+            for size in (0.40, 0.36, 0.32, 0.28, 0.24):
+                hits, x0, y0 = _free_box(points, size, pad)
+                if found is None or hits < found[0]:
+                    found = (hits, x0, y0, size)
+                if hits == 0:
+                    break
+            _, x0, y0, size = found
+
+            inset = ax.inset_axes([x0, y0, size, size])
+            inset.set_facecolor("white")
+            inset_freq = _draw(inset, part, cutoff, reached, label_cutoff=False, full=True)
+            zoom_top = freq.get_ylim()[1] / inset_freq.get_ylim()[1] * inset.get_ylim()[1]
+            inset.axhspan(0, zoom_top, color=ZOOMED, lw=0, zorder=0)
+            for axis, label in ((inset, "overlap"), (inset_freq, "frequency")):
+                axis.set_ylabel(label, fontsize=13)
+                axis.tick_params(labelsize=11)
+            inset.set_xlabel("support", fontsize=13)
+
+        handles = ax.get_lines() + freq.get_lines()
+        if inset:
+            handles.append(Patch(facecolor=ZOOMED, label="inset: range of main panel"))
+        ax.legend(
+            handles,
+            [h.get_label() for h in handles],
+            loc="lower center",
+            bbox_to_anchor=(0.5, 1.01),
+            ncol=3,
+            frameon=False,
+            columnspacing=1.4,
+            handlelength=2.2,
+        )
+        status = f"cutoff {cutoff:.2f}" if reached else "not FDR-controlled"
+        print(f"zeta {chosen:.3g}: {status}")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output, dpi=200)
+        plt.close(fig)
+    print(output)
+
+
 def plot_support(
     table: pd.DataFrame,
     zeta: float | None,
     output: Path,
     archive: dict | None,
     links: np.ndarray | None,
+    inset: bool = True,
 ) -> None:
-    zetas = [zeta] if zeta is not None else [float(value) for value in np.sort(table["zeta"].unique())]
-    many = len(zetas) > 1
-    cols = 1 if not many else min(3, len(zetas))
+    zetas = [float(value) for value in np.sort(table["zeta"].unique())]
+    if zeta is not None or len(zetas) == 1:
+        _plot_single(table, zetas[0] if zeta is None else zeta, output, archive, links, inset)
+        return
+    cols = min(3, len(zetas))
     rows = int(np.ceil(len(zetas) / cols))
-    fig, axes = plt.subplots(
-        rows, cols,
-        figsize=(11, 7.5) if not many else (4.6 * cols, 3.3 * rows),
-        squeeze=False,
-    )
+    fig, axes = plt.subplots(rows, cols, figsize=(4.6 * cols, 3.3 * rows), squeeze=False)
     freq = None
     first_freq = None
     for i, (ax, value) in enumerate(zip(axes.ravel(), zetas)):
         chosen, part, cutoff, reached, n_links = _slice(table, value, archive, links)
-        freq = _draw(ax, part, cutoff, reached, label_cutoff=not many)
+        freq = _draw(ax, part, cutoff, reached, label_cutoff=False)
         if first_freq is None:
             first_freq = freq
-        if not many:
-            # Full support range, including the 0.99–1 bin, in the region above
-            # the overlap curve. The legend sits above the inset.
-            inset = ax.inset_axes([0.24, 0.55, 0.52, 0.24])
-            inset.set_facecolor("white")
-            inset_freq = _draw(inset, part, cutoff, reached, label_cutoff=False, full=True)
-            inset.set_xlabel("support", fontsize=7)
-            inset.set_ylabel("overlap", fontsize=7)
-            inset_freq.set_ylabel("frequency", fontsize=7)
-            inset.tick_params(labelsize=6)
-            inset_freq.tick_params(labelsize=6)
-            handles = list(ax.get_lines()) + list(freq.get_lines())
-            ax.legend(
-                handles,
-                [line.get_label() for line in handles],
-                loc="upper center",
-                bbox_to_anchor=(0.5, 1.0),
-                ncol=3,
-                frameon=True,
-                framealpha=1,
-                edgecolor="0.6",
-                fontsize=7,
-                borderaxespad=0.2,
-            )
         status = f"cutoff {cutoff:.2f}" if reached else "not FDR-controlled"
         if i % cols == 0:
             ax.set_ylabel("overlap")
@@ -144,20 +242,19 @@ def plot_support(
         print(f"zeta {chosen:.3g}: {status}")
     for ax in axes.ravel()[len(zetas):]:
         ax.axis("off")
-    if many:
-        handles = list(axes.ravel()[0].get_lines()) + list(first_freq.get_lines())
-        axes.ravel()[0].legend(
-            handles,
-            [line.get_label() for line in handles],
-            loc="upper right",
-            frameon=True,
-            framealpha=1,
-            edgecolor="0.6",
-            fontsize=6,
-        )
+    handles = list(axes.ravel()[0].get_lines()) + list(first_freq.get_lines())
+    axes.ravel()[0].legend(
+        handles,
+        [line.get_label() for line in handles],
+        loc="upper right",
+        frameon=True,
+        framealpha=1,
+        edgecolor="0.6",
+        fontsize=6,
+    )
     fig.subplots_adjust(left=0.10, right=0.90, bottom=0.12, top=0.96)
     output.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output, dpi=150 if many else 200)
+    fig.savefig(output, dpi=150)
     plt.close(fig)
     print(output)
 
@@ -213,12 +310,16 @@ def plot_near_degree(table, archive, links, output: Path, per_gene: float = 3.0,
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("run", type=Path, help="NestBoot .npy, or the _support.tsv itself")
+    parser.add_argument(
+        "run", type=Path,
+        help="NestBoot .npy, or a _support.tsv (the _support.npz beside it is read when present)",
+    )
     parser.add_argument("--zeta", type=float, default=None, help="One sparsity. Omit to plot every sparsity")
     parser.add_argument("-o", "--output", type=Path, default=Path("support.png"))
+    parser.add_argument("--no-inset", action="store_true", help="With --zeta, leave out the full-range inset")
     args = parser.parse_args()
     table, archive, links = support_table(args.run)
-    plot_support(table, args.zeta, args.output, archive, links)
+    plot_support(table, args.zeta, args.output, archive, links, inset=not args.no_inset)
 
 
 if __name__ == "__main__":
