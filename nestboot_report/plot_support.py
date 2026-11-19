@@ -13,6 +13,9 @@ From the pyGS root:
 
   uv run python nestboot_report/plot_support.py \\
       nestboot_report/runs_100x100/real.npy --zeta 0.158 -o support.png
+
+  uv run python nestboot_report/plot_support.py \\
+      K562_Ridge_out.npy --zeta 0.00158 --min-support 1 -o support.png
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ import numpy as np
 import pandas as pd
 
 MEASURED, SHUFFLED, CUT = "#1f5aa6", "#c8312b", "#d9a400"
+KEPT = "#333333"
 
 
 def support_table(path: Path) -> tuple[pd.DataFrame, dict | None, np.ndarray | None]:
@@ -146,7 +150,9 @@ SINGLE_STYLE = {
 ZOOMED = "0.86"
 
 
-def _plot_single(table, zeta, output: Path, archive, links, inset: bool = True) -> None:
+def _plot_single(
+    table, zeta, output: Path, archive, links, inset: bool = True, min_support: float | None = None
+) -> None:
     """One sparsity, with an inset showing the full frequency range unless ``inset`` is False.
 
     The inset has the main panel's aspect ratio and sits where it crosses the
@@ -160,6 +166,24 @@ def _plot_single(table, zeta, output: Path, archive, links, inset: bool = True) 
         fig.subplots_adjust(left=0.09, right=0.90, bottom=0.10, top=0.84)
         chosen, part, cutoff, reached, n_links = _slice(table, zeta, archive, links)
         freq = _draw(ax, part, cutoff, reached, label_cutoff=True)
+        if not reached and archive is not None and "fdr_at_cutoff" in archive and np.isfinite(cutoff):
+            # The run still keeps the links at this cutoff, so mark it with the FDR it reached.
+            index = int(np.argmin(np.abs(np.log(archive["zetavec"] / chosen))))
+            fdr = float(archive["fdr_at_cutoff"][index])
+            ax.axvline(cutoff, color=CUT, ls="--", lw=1.3, label=f"cutoff {cutoff:.2f} (FDR {fdr:.1%})")
+            if cutoff >= 1:
+                ax.set_xlim(0, 1.01)
+        if min_support is not None and archive is not None and min_support > cutoff:
+            from bio.nestboot_tables import tail_fdr
+
+            index = int(np.argmin(np.abs(np.log(archive["zetavec"] / chosen))))
+            fdr = tail_fdr(archive, index, min_support)
+            ax.axvline(
+                min_support, color=KEPT, ls="-.", lw=1.3,
+                label=f"kept: support ≥ {min_support:.2f} (FDR {fdr:.1%})",
+            )
+            if min_support >= 1:
+                ax.set_xlim(0, 1.01)
         for line in ax.get_lines() + freq.get_lines():
             line.set_linewidth(2.2)
         ax.set_xlabel("support")
@@ -217,10 +241,11 @@ def plot_support(
     archive: dict | None,
     links: np.ndarray | None,
     inset: bool = True,
+    min_support: float | None = None,
 ) -> None:
     zetas = [float(value) for value in np.sort(table["zeta"].unique())]
     if zeta is not None or len(zetas) == 1:
-        _plot_single(table, zetas[0] if zeta is None else zeta, output, archive, links, inset)
+        _plot_single(table, zetas[0] if zeta is None else zeta, output, archive, links, inset, min_support)
         return
     cols = min(3, len(zetas))
     rows = int(np.ceil(len(zetas) / cols))
@@ -317,9 +342,13 @@ def main() -> None:
     parser.add_argument("--zeta", type=float, default=None, help="One sparsity. Omit to plot every sparsity")
     parser.add_argument("-o", "--output", type=Path, default=Path("support.png"))
     parser.add_argument("--no-inset", action="store_true", help="With --zeta, leave out the full-range inset")
+    parser.add_argument(
+        "--min-support", type=float, default=None,
+        help="With --zeta, also mark a stricter support cutoff and its estimated FDR, as in pygs plot --min-support",
+    )
     args = parser.parse_args()
     table, archive, links = support_table(args.run)
-    plot_support(table, args.zeta, args.output, archive, links, inset=not args.no_inset)
+    plot_support(table, args.zeta, args.output, archive, links, inset=not args.no_inset, min_support=args.min_support)
 
 
 if __name__ == "__main__":

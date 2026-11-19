@@ -58,12 +58,31 @@ def _core(present: np.ndarray, weight: np.ndarray, genes: int, links: int | None
     return top
 
 
+def tail_fdr(archive, index: int, cutoff: float) -> float:
+    """Shuffled over measured links with support at least ``cutoff``, as NestBoot's FDR at its cutoff.
+
+    NaN when the archive has no per-run histograms.
+    """
+    from methods.nestboot import support_bins
+
+    if "run_histograms" not in archive:
+        return float("nan")
+    runs = np.asarray(archive["run_histograms"])[:, index]
+    n_outer, n_inner = runs.shape[0], runs.shape[1] - 1
+    counts = np.zeros((n_outer, 2))
+    np.add.at(counts, support_bins(n_inner, n_outer), runs.sum(axis=0))
+    cut_bin = min(max(int(round(cutoff * n_outer)), 1), n_outer)
+    kept = counts[cut_bin - 1 :].sum(axis=0)
+    return float(kept[1] / kept[0]) if kept[0] else float("nan")
+
+
 def nestboot_tables(
     run: Path,
     zeta: float,
     per_gene: float | None = 3.0,
     top_genes: int | None = None,
     top_links: int | None = None,
+    min_support: float | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Edges and nodes for the sparsity nearest ``zeta``.
 
@@ -72,6 +91,10 @@ def nestboot_tables(
     ``top_genes`` replaces that cut: only the ``top_genes`` genes with the most FDR
     links are kept, and of the links among them, the ``top_links`` with the
     highest support.
+
+    ``min_support`` keeps only links with at least that support in every outer
+    run, a stricter cutoff than the run's own when it is higher. ``info["fdr"]``
+    is the estimated FDR at whichever cutoff is applied.
     """
     run = Path(run)
     support_path = run.with_name(run.stem + "_support.npz")
@@ -87,6 +110,11 @@ def nestboot_tables(
     index = int(np.argmin(np.abs(np.log(support["zetavec"] / zeta))))
     genes = np.asarray(support["genes"]).astype(str)
     present = binary[:, :, index]
+    run_cutoff = float(support["support_cutoff"][index])
+    applied = run_cutoff
+    if min_support is not None and min_support > run_cutoff:
+        applied = float(min_support)
+        present = present & (support["min_support"][:, :, index] >= applied - 1e-9)
     if top_genes:
         present = _core(present, support["mean_support"][:, :, index], top_genes, top_links)
     elif per_gene:
@@ -117,9 +145,11 @@ def nestboot_tables(
     nodes = nodes[(nodes["out_degree"] + nodes["in_degree"]) > 0].reset_index(drop=True)
     info = {
         "zeta": float(support["zetavec"][index]),
-        "cutoff": float(support["support_cutoff"][index]),
+        "cutoff": run_cutoff,
         "fdr_reached": bool(support["fdr_reached"][index]),
         "links": len(edges),
+        "applied_cutoff": applied,
+        "fdr": tail_fdr(support, index, applied),
     }
     return edges, nodes, info
 

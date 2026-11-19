@@ -125,3 +125,46 @@ def test_core_keeps_the_best_connected_genes_then_the_strongest_links(tmp_path):
     edges, nodes, _ = nestboot_tables(run, zeta=0.1, top_genes=3, top_links=2)
     assert set(zip(edges.regulator, edges.target)) == {("C", "B"), ("A", "C")}
     assert set(nodes["gene"]) == {"A", "B", "C"}
+
+
+def test_min_support_keeps_links_at_a_stricter_cutoff_and_reports_its_fdr(tmp_path):
+    genes = np.array(["A", "B", "C"])
+    binary = np.zeros((3, 3, 1))
+    minimum = np.zeros((3, 3, 1))
+    # B→A has support 1.0 in every outer run, C→A 0.99 in its weakest one.
+    for target, regulator, weight in ((0, 1, 1.0), (0, 2, 0.99)):
+        binary[target, regulator, 0] = 1
+        minimum[target, regulator, 0] = weight
+    # 4 outer runs of 4 bootstraps; links per support count 0..4, measured then
+    # shuffled, summed over runs: support 1: 10 measured, 1 shuffled; support 0.5:
+    # 10 measured, 3 shuffled.
+    runs = np.zeros((4, 1, 5, 2))
+    runs[:, 0, 4] = [2.5, 0.25]
+    runs[:, 0, 2] = [2.5, 0.75]
+    run = tmp_path / "out.npy"
+    np.save(run, binary)
+    np.save(tmp_path / "out_signed.npy", minimum)
+    np.savez(
+        tmp_path / "out_support.npz",
+        zetavec=np.array([0.1]),
+        support_cutoff=np.array([0.5]),
+        fdr_reached=np.array([True]),
+        mean_support=minimum,
+        min_support=minimum,
+        run_histograms=runs,
+        genes=genes,
+        knockdown_z=np.zeros(3),
+        failed_knockdowns=np.zeros(3, dtype=bool),
+    )
+
+    edges, _, info = nestboot_tables(run, zeta=0.1, per_gene=None)
+    assert len(edges) == 2 and info["applied_cutoff"] == 0.5
+    assert np.isclose(info["fdr"], 4 / 20)
+
+    edges, _, info = nestboot_tables(run, zeta=0.1, per_gene=None, min_support=1.0)
+    assert set(zip(edges.regulator, edges.target)) == {("B", "A")}
+    assert info["cutoff"] == 0.5 and info["applied_cutoff"] == 1.0
+    assert np.isclose(info["fdr"], 1 / 10)
+
+    _, _, info = nestboot_tables(run, zeta=0.1, per_gene=None, min_support=0.3)
+    assert info["applied_cutoff"] == 0.5

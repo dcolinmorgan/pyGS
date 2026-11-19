@@ -26,6 +26,7 @@ Usage::
     pygs nestboot data.csv -m lsco --nest-runs 100 --boot-runs 100 --zeta=-4:0:41 --output out.npy
     pygs plot out.npy --zeta 0.063 --per-gene 3 -o edges.csv
     pygs plot out.npy --zeta 0.063 --top-genes 170 --top-links 510 -o edges.csv
+    pygs plot ridge.npy --zeta 0.00158 --per-gene 0 --min-support 1
     pygs nestboot --runs 100x100 -m lsco -f data.csv --output out.npy
     pygs evaluate pred.npy --gold gold.npy       # evaluate against gold standard
     pygs plot pred.npy --genes genes.txt         # plot a GRN
@@ -1800,9 +1801,11 @@ def _cmd_plot_nestboot(args: argparse.Namespace) -> None:
     per_gene = None if args.per_gene == 0 else args.per_gene
     core = getattr(args, "top_genes", None)
     top_links = getattr(args, "top_links", None)
+    min_support = getattr(args, "min_support", None)
     try:
         edges, nodes, info = nestboot_tables(
-            run, args.zeta, per_gene, top_genes=core, top_links=top_links
+            run, args.zeta, per_gene, top_genes=core, top_links=top_links,
+            min_support=min_support,
         )
     except FileNotFoundError as exc:
         console.print(f"  [{ROSE}]{exc}[/]")
@@ -1812,6 +1815,8 @@ def _cmd_plot_nestboot(args: argparse.Namespace) -> None:
         suffix = f"_{core}genes" + (f"_{top_links}links" if top_links else "")
     else:
         suffix = "_3pergene" if per_gene else ""
+    if info["applied_cutoff"] > info["cutoff"]:
+        suffix += f"_support{info['applied_cutoff']:g}"
     if args.output and Path(args.output).suffix.lower() in (".csv", ".tsv", ".txt"):
         edges_path = Path(args.output)
         nodes_path = nodes_path_for(edges_path)
@@ -1822,6 +1827,10 @@ def _cmd_plot_nestboot(args: argparse.Namespace) -> None:
     write_table(edges, edges_path)
     write_table(nodes, nodes_path)
     status = f"cutoff {info['cutoff']:.2f}" if info["fdr_reached"] else "not FDR-controlled"
+    if info["applied_cutoff"] > info["cutoff"]:
+        status += f", kept support ≥ {info['applied_cutoff']:.2f}"
+    if np.isfinite(info["fdr"]):
+        status += f", estimated FDR {info['fdr']:.1%}"
     console.print(
         f"  [{GREEN}]✓[/] zeta {info['zeta']:.3g}: {info['links']} links, "
         f"{len(nodes)} genes, {status}"
@@ -2897,6 +2906,11 @@ def main() -> None:
     pp.add_argument(
         "--top-links", type=int, default=None,
         help="With --top-genes, keep this many highest-support links among those genes",
+    )
+    pp.add_argument(
+        "--min-support", type=float, default=None,
+        help="With --zeta, keep only links with at least this support in every outer run, "
+        "when it is above the run's cutoff. The estimated FDR at that support is printed",
     )
     pp.add_argument(
         "--graphistry", action="store_true",
