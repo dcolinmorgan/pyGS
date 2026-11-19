@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The SNR benchmark on stored GeneSPIDER files moved from `bench --snr` to `bench-gs --snr`. A requested SNR with no stored file stops the run before any inference
 - `bench --snr` generates new stable networks, knockdown designs and expression from `--n-nodes`, `--topologies`, `--sparsity`, `--n-datasets` and `--n-samples`, at any positive SNR_L. `bench` no longer takes `--sizes`
 - Direct baseline in `bench-gs` now averages absolute adjacency matrices across the alpha sweep (bagging over regularization strengths) instead of selecting a single alpha by bootstrap stability
-- `pygs plot --graphistry` uploads every link as its own edge, so a reciprocal pair keeps an arrowhead at each end, and leaves the layout to Graphistry. Nodes are one light blue sized by degree; edges are straight and opaque, with no labels, on a white background
+- `pygs plot --graphistry` uploads every link as its own edge, so a reciprocal pair keeps an arrowhead at each end, and leaves the layout to Graphistry. Nodes are one light blue sized by degree; genes are labelled, and edges are straight and opaque on a white background
 
 ## [1.0.0] - 2026-04-11
 

@@ -1879,7 +1879,7 @@ def _cmd_plot_nestboot(args: argparse.Namespace) -> None:
             categorical_mapping={"activation": "#2e7d32", "repression": "#c62828"},
         )
         .settings(url_params={
-            "showLabels": False, "edgeCurvature": 0, "edgeOpacity": 1.0,
+            "showLabels": True, "edgeCurvature": 0, "edgeOpacity": 1.0,
             "pointSize": 0.25, "pointStrokeWidth": 10,
         })
         .addStyle(bg={"color": "#FFFFFF"})
