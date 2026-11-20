@@ -242,6 +242,7 @@ def plot_support(
     links: np.ndarray | None,
     inset: bool = True,
     min_support: float | None = None,
+    full_range: bool = False,
 ) -> None:
     zetas = [float(value) for value in np.sort(table["zeta"].unique())]
     if zeta is not None or len(zetas) == 1:
@@ -254,7 +255,7 @@ def plot_support(
     first_freq = None
     for i, (ax, value) in enumerate(zip(axes.ravel(), zetas)):
         chosen, part, cutoff, reached, n_links = _slice(table, value, archive, links)
-        freq = _draw(ax, part, cutoff, reached, label_cutoff=False)
+        freq = _draw(ax, part, cutoff, reached, label_cutoff=False, full=full_range)
         if first_freq is None:
             first_freq = freq
         status = f"cutoff {cutoff:.2f}" if reached else "not FDR-controlled"
@@ -346,9 +347,16 @@ def main() -> None:
         "--min-support", type=float, default=None,
         help="With --zeta, also mark a stricter support cutoff and its estimated FDR, as in pygs plot --min-support",
     )
+    parser.add_argument(
+        "--full-range", action="store_true",
+        help="Without --zeta, give every panel the frequency range 0-1, as in the inset, so panels share one scale",
+    )
     args = parser.parse_args()
     table, archive, links = support_table(args.run)
-    plot_support(table, args.zeta, args.output, archive, links, inset=not args.no_inset, min_support=args.min_support)
+    plot_support(
+        table, args.zeta, args.output, archive, links,
+        inset=not args.no_inset, min_support=args.min_support, full_range=args.full_range,
+    )
 
 
 if __name__ == "__main__":

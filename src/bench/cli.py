@@ -431,7 +431,7 @@ def _cmd_infer(args: argparse.Namespace) -> None:
     from sparselink import get_method
 
     import sparselink.methods  # noqa: F401
-    from bio.io import PERTURBATION_METHODS, load_inference_inputs
+    from bio.io import design_targets, load_inference_inputs
 
     path = Path(args.file)
     try:
@@ -451,7 +451,7 @@ def _cmd_infer(args: argparse.Namespace) -> None:
     console.print(f"  [{TEAL}]Method[/]  {args.method}")
 
     method = get_method(args.method)
-    fit_P = P if args.method in PERTURBATION_METHODS else None
+    fit_P = design_targets(args.method, P)
     with console.status(f"[{TEAL}]Running {args.method}...[/]"):
         result = method().fit(X, fit_P)
 
@@ -671,13 +671,15 @@ def _scores_along_sparsity(method_name: str, X: np.ndarray, P: np.ndarray | None
         else:
             from sparselink import get_method
             from bench.genespider import ALPHA_SWEEP
+            from bio.io import design_targets
             method_cls = get_method(method_name)
             param = ALPHA_SWEEP.get(method_name)
             settings = zeta if param is not None else [None]
+            targets = design_targets(method_name, P)
             pieces = []
             for alpha in settings:
                 kwargs = {param: float(alpha)} if param is not None else {}
-                pieces.append(method_cls(**kwargs).fit(X, P).adjacency_matrix)
+                pieces.append(method_cls(**kwargs).fit(X, targets).adjacency_matrix)
             stack = np.stack(pieces, axis=2)
             used = settings
     stack = np.asarray(stack, dtype=float)
@@ -1106,6 +1108,7 @@ def _run_direct_fair(
     from sparselink.bench.metrics import evaluate
 
     from bench.genespider import ALPHA_SWEEP, PYGS_METHODS, _fit_pygs_method
+    from bio.io import design_targets
 
     import sparselink.methods  # noqa: F401
 
@@ -1139,13 +1142,13 @@ def _run_direct_fair(
             alpha_range = np.logspace(-3, 0, 10)
             adj_sum = np.zeros((n, n))
             for alpha in alpha_range:
-                r = method_cls(**{alpha_param: float(alpha)}).fit(X, P)
+                r = method_cls(**{alpha_param: float(alpha)}).fit(X, design_targets(method_name, P))
                 adj_sum += np.abs(r.adjacency_matrix)
             best_adj = adj_sum / len(alpha_range)
             np.fill_diagonal(best_adj, 0.0)
         else:
             method_cls = get_method(method_name)
-            result = method_cls().fit(X, P)
+            result = method_cls().fit(X, design_targets(method_name, P))
             best_adj = result.adjacency_matrix
 
         elapsed = time.perf_counter() - t0
@@ -1205,6 +1208,7 @@ def _run_nestboot_on_gs(
 
     # Determine if this method supports a native regularization parameter
     from bench.genespider import ALPHA_SWEEP
+    from bio.io import design_targets
 
     has_native_alpha = method_name in ALPHA_SWEEP
     if has_native_alpha:
@@ -1220,7 +1224,7 @@ def _run_nestboot_on_gs(
         Y = dataset.data.Y  # type: ignore[union-attr]
         P_mat = dataset.data.P  # type: ignore[union-attr]
         X_in = Y.T
-        P_in = P_mat.T if P_mat is not None and P is not None else None
+        P_in = design_targets(method_name, P_mat.T) if P_mat is not None and P is not None else None
         _call_count[0] += 1
 
         if method_name in {"lasso", "lsco"} and P is not None:
@@ -1533,7 +1537,7 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
 
     import sparselink.methods  # noqa: F401
 
-    from bio.io import PERTURBATION_METHODS, load_inference_inputs
+    from bio.io import design_targets, load_inference_inputs
     from config import AnalysisConfig
     from methods.nestboot import Nestboot
 
@@ -1613,7 +1617,6 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
 
     method_cls = get_method(method_name)
 
-    use_P = method_name in PERTURBATION_METHODS
     # GeneSPIDER's NestBoot LSCO (rawZeta = 1) cuts |coefficient| <= zeta on Y
     # rescaled to [-1, 1] over the whole matrix, so a zeta grid means the same
     # sparsities on any data scale.
@@ -1621,6 +1624,12 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
     y_lo, y_hi = float(matrix.min()), float(matrix.max())
     if rescale:
         console.print(f"  [{DIM}]LSCO cutoff |coef| ≤ zeta, with Y rescaled to [-1, 1][/]")
+    # As in GeneSPIDER's Glmnet, zeta is the penalty: one fit per zeta, no cutoff.
+    l1_ratio = {"lasso": 1.0, "elastic_net": 0.5}.get(method_name) if zeta is not None else None
+    if l1_ratio is not None:
+        from methods.lasso import penalty_path
+
+        console.print(f"  [{DIM}]{method_name} penalty = zeta, one fit per zeta[/]")
 
     def _infer(dataset: Data, **kwargs: object) -> np.ndarray:
         """Run sparselink method on a pyGS Data object."""
@@ -1628,10 +1637,10 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
         if rescale:
             Y = 2 * (Y - y_lo) / (y_hi - y_lo) - 1
         X = Y.T  # sparselink expects (samples × features)
-        fit_P = None
-        if use_P:
-            P_mat = dataset.data.P  # type: ignore[union-attr]
-            fit_P = None if P_mat is None else P_mat.T
+        P_mat = dataset.data.P  # type: ignore[union-attr]
+        fit_P = None if P_mat is None else design_targets(method_name, P_mat.T)
+        if l1_ratio is not None:
+            return penalty_path(X, X if fit_P is None else fit_P, zeta, l1_ratio)
         result = method_cls().fit(X, fit_P)
         adj = result.adjacency_matrix
         # A dense fit is scored by which links pass each cutoff. --zeta supplies
@@ -1673,6 +1682,7 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
             boot_runs=args.boot_runs,
             seed=args.seed,
             keep_design=P is not None,
+            processes=getattr(args, "processes", 0),
         )
 
     # Report
@@ -2188,6 +2198,7 @@ def _infer_from_genespider() -> None:
             try:
                 with console.status(f"[{TEAL}]Running {method_name} on {size}...[/]"):
                     from bench.genespider import ALPHA_SWEEP, PYGS_METHODS
+                    from bio.io import design_targets
                     if method_name in PYGS_METHODS:
                         from analyze.Data import Data
                         from datastruct.Dataset import Dataset as DS
@@ -2232,7 +2243,7 @@ def _infer_from_genespider() -> None:
                         alphas = np.logspace(-4, 1, 20)
                         best_auroc, adj = -1.0, np.zeros_like(A_true)
                         for a in alphas:
-                            r = method_cls(**{param: float(a)}).fit(X, P)
+                            r = method_cls(**{param: float(a)}).fit(X, design_targets(method_name, P))
                             from sklearn.metrics import roc_auc_score
                             mask = ~np.eye(A_true.shape[0], dtype=bool)
                             try:
@@ -2246,7 +2257,7 @@ def _infer_from_genespider() -> None:
                                 best_auroc, adj = sc, r.adjacency_matrix
                     else:
                         method_cls = get_method(method_name)
-                        result = method_cls().fit(X, P)
+                        result = method_cls().fit(X, design_targets(method_name, P))
                         adj = result.adjacency_matrix
                 n_edges = int(np.count_nonzero(adj) - np.count_nonzero(np.diag(adj)))
                 metrics = evaluate(A_true, adj)
@@ -2311,8 +2322,10 @@ def _infer_from_synthetic() -> None:
     from sparselink.bench.metrics import evaluate
     import sparselink.methods  # noqa: F401
     from bench.genespider import ALPHA_SWEEP
+    from bio.io import design_targets
 
     method_cls = get_method(method)
+    P_input = design_targets(method, P_input)
     console.print(f"  [{TEAL}]Method[/]  {method}")
 
     with console.status(f"[{TEAL}]Running {method}...[/]"):
@@ -2432,9 +2445,11 @@ def _synthetic_guide() -> None:
         import sparselink.methods  # noqa: F401
         from sparselink.bench.metrics import evaluate
         from bench.genespider import ALPHA_SWEEP
+        from bio.io import design_targets
 
         method = Prompt.ask(f"  [{DIM}]Method[/]", default="lasso")
         method_cls = get_method(method)
+        P_input = design_targets(method, P_input)
 
         with console.status(f"[{TEAL}]Running {method}...[/]"):
             if method in ALPHA_SWEEP:
@@ -2827,6 +2842,10 @@ def main() -> None:
     nb.add_argument("--fdr", type=float, default=0.05, help="FDR threshold")
     nb.add_argument("--seed", type=int, default=42)
     nb.add_argument(
+        "--processes", type=int, default=0,
+        help="Fit bootstraps in this many processes instead of threads. Faster for lasso and elastic_net",
+    )
+    nb.add_argument(
         "--output",
         default="nestboot.npy",
         help="Adjacency .npy, or an edge table (.tsv or .csv) with the arrays saved "
@@ -2840,7 +2859,10 @@ def main() -> None:
     nb.add_argument(
         "--zeta",
         default=None,
-        help="LSCO sparsity grid. -4:0:41 is logspace from 1e-4 to 1 with 41 steps. A comma list is used as written",
+        help=(
+            "Sparsity grid: the penalty for lasso and elastic_net, a cutoff on |coefficient| for other methods. "
+            "-4:0:41 is logspace from 1e-4 to 1 with 41 steps. A comma list is used as written"
+        ),
     )
     nb.add_argument(
         "--table-zeta",

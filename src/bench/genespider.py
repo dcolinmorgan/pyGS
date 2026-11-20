@@ -27,6 +27,8 @@ from sparselink import list_methods
 from sparselink.bench.metrics import evaluate
 from sparselink.registry import get_method
 
+from bio.io import design_targets
+
 import sparselink.methods  # noqa: F401
 
 DATASET_COMMIT = "d2047430263f5ffe473525c74b4318f723c23b0e"
@@ -315,6 +317,7 @@ def _fit_best(method_name: str, X: np.ndarray, A_true: np.ndarray, P: np.ndarray
         return _fit_pygs_method(method_name, X, A_true, P)
 
     method_cls = get_method(method_name)
+    P = design_targets(method_name, P)
     if method_name in ALPHA_SWEEP:
         param = ALPHA_SWEEP[method_name]
         best_auroc = -1.0

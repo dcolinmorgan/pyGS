@@ -260,6 +260,7 @@ def infer_stack(
         from sparselink import get_method
 
         from bench.genespider import ALPHA_SWEEP
+        from bio.io import design_targets
 
         method_cls = get_method(method_name)
         param = ALPHA_SWEEP.get(method_name)
@@ -267,7 +268,7 @@ def infer_stack(
         pieces = []
         for alpha in settings:
             kwargs = {param: float(alpha)} if param is not None else {}
-            pieces.append(method_cls(**kwargs).fit(Y.T, None if P is None else P.T).adjacency_matrix)
+            pieces.append(method_cls(**kwargs).fit(Y.T, design_targets(method_name, None if P is None else P.T)).adjacency_matrix)
         stack = np.stack(pieces, axis=2)
         used = settings
     stack = np.asarray(stack, dtype=float)
