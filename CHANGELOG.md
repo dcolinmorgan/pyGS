@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `pygs nestboot --no-design` fits LASSO, ridge and elastic net to expression alone, as pyGS did before, for comparison. `--zeta-cutoff` runs LASSO and elastic net like LSCO: one fit at `--alpha`, then `|coefficient| <= zeta` on Y rescaled to [-1, 1]. Single-penalty LASSO and elastic net fits reuse X'X, about 9× faster than sparselink's fit on K562
 - `pygs nestboot --processes N` fits bootstraps in N forked processes instead of threads. LASSO and elastic net hold the GIL for most of a fit, so threads give them about 3× on 48 cores. On K562, 48 processes run 100 × 100 LASSO over `--zeta=-3:-1:21` in about an hour
 - `pygs` CLI with interactive mode and subcommands (`status`, `methods`, `infer`, `bench`, `bench-gs`, `nestboot`, `evaluate`, `plot`, `show`, `dashboard`)
 - GeneSpider live benchmark runner with Rich progress bars in the `pygs` CLI

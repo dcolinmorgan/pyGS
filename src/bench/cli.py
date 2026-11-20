@@ -1620,16 +1620,27 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
     # GeneSPIDER's NestBoot LSCO (rawZeta = 1) cuts |coefficient| <= zeta on Y
     # rescaled to [-1, 1] over the whole matrix, so a zeta grid means the same
     # sparsities on any data scale.
-    rescale = zeta is not None and method_name == "lsco"
+    # As in GeneSPIDER's Glmnet, zeta is the penalty: one fit per zeta, no cutoff.
+    # --zeta-cutoff runs lasso and elastic net like LSCO instead.
+    zeta_cutoff = bool(getattr(args, "zeta_cutoff", False))
+    l1 = {"lasso": 1.0, "elastic_net": 0.5}.get(method_name)
+    l1_ratio = l1 if zeta is not None and not zeta_cutoff else None
+    rescale = zeta is not None and (method_name == "lsco" or zeta_cutoff)
     y_lo, y_hi = float(matrix.min()), float(matrix.max())
     if rescale:
-        console.print(f"  [{DIM}]LSCO cutoff |coef| ≤ zeta, with Y rescaled to [-1, 1][/]")
-    # As in GeneSPIDER's Glmnet, zeta is the penalty: one fit per zeta, no cutoff.
-    l1_ratio = {"lasso": 1.0, "elastic_net": 0.5}.get(method_name) if zeta is not None else None
-    if l1_ratio is not None:
+        console.print(f"  [{DIM}]{method_name} cutoff |coef| ≤ zeta, with Y rescaled to [-1, 1][/]")
+    if l1 is not None:
         from methods.lasso import penalty_path
-
+    if l1_ratio is not None:
         console.print(f"  [{DIM}]{method_name} penalty = zeta, one fit per zeta[/]")
+    no_design = bool(getattr(args, "no_design", False))
+    if no_design:
+        console.print(f"  [{DIM}]Fit to expression alone; the design only groups bootstraps[/]")
+    alpha = getattr(args, "alpha", None)
+    fit_kwargs = {} if alpha is None else {"alpha": float(alpha)}
+    if l1 is not None and l1_ratio is None:
+        single = np.array([0.01 if alpha is None else float(alpha)])
+        console.print(f"  [{DIM}]{method_name} penalty {single[0]:g}[/]")
 
     def _infer(dataset: Data, **kwargs: object) -> np.ndarray:
         """Run sparselink method on a pyGS Data object."""
@@ -1638,11 +1649,13 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
             Y = 2 * (Y - y_lo) / (y_hi - y_lo) - 1
         X = Y.T  # sparselink expects (samples × features)
         P_mat = dataset.data.P  # type: ignore[union-attr]
-        fit_P = None if P_mat is None else design_targets(method_name, P_mat.T)
+        fit_P = None if P_mat is None or no_design else design_targets(method_name, P_mat.T)
         if l1_ratio is not None:
             return penalty_path(X, X if fit_P is None else fit_P, zeta, l1_ratio)
-        result = method_cls().fit(X, fit_P)
-        adj = result.adjacency_matrix
+        if l1 is not None:
+            adj = penalty_path(X, X if fit_P is None else fit_P, single, l1)[:, :, 0]
+        else:
+            adj = method_cls(**fit_kwargs).fit(X, fit_P).adjacency_matrix
         # A dense fit is scored by which links pass each cutoff. --zeta supplies
         # those cutoffs; otherwise use a short quantile sweep.
         scores = np.abs(adj)
@@ -2841,6 +2854,18 @@ def main() -> None:
     )
     nb.add_argument("--fdr", type=float, default=0.05, help="FDR threshold")
     nb.add_argument("--seed", type=int, default=42)
+    nb.add_argument(
+        "--zeta-cutoff", action="store_true",
+        help="lasso and elastic_net: fit once at --alpha and cut |coefficient| <= zeta on Y rescaled to [-1, 1], as for LSCO",
+    )
+    nb.add_argument(
+        "--alpha", type=float, default=None,
+        help="Penalty of the single fit for methods whose zeta is a cutoff. Default: the method's own",
+    )
+    nb.add_argument(
+        "--no-design", action="store_true",
+        help="Fit lasso, ridge and elastic_net to expression alone, as pyGS did before, ignoring the knockdown design",
+    )
     nb.add_argument(
         "--processes", type=int, default=0,
         help="Fit bootstraps in this many processes instead of threads. Faster for lasso and elastic_net",

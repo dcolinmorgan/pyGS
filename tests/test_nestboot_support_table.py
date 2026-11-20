@@ -82,3 +82,40 @@ def test_dropout_and_failed_knockdown_flags(tmp_path):
     assert support["knockdown_z"][3] > 0 > support["knockdown_z"][:3].max()
     summary = (tmp_path / "run.txt").read_text()
     assert "knockdowns removed (own-gene z > 0.0): 1 [G4]; samples used: 6" in summary
+
+
+def test_lasso_targets_follow_design_zeta_and_no_design_options(tmp_path, monkeypatch):
+    import methods.lasso
+
+    rng = np.random.default_rng(0)
+    genes = ["G1", "G2", "G3", "G4"]
+    columns = [gene for gene in genes for _ in range(2)]
+    values = rng.normal(size=(4, 8))
+    data = tmp_path / "ymatrix.csv"
+    pd.DataFrame(values, index=genes, columns=columns).to_csv(data, sep="\t")
+    calls = []
+
+    def fake_path(X, targets, alphas, l1_ratio=1.0):
+        calls.append((X, targets, np.asarray(alphas)))
+        return np.zeros((X.shape[1], X.shape[1], len(alphas)))
+
+    monkeypatch.setattr(methods.lasso, "penalty_path", fake_path)
+
+    def run(**options):
+        calls.clear()
+        cli._cmd_nestboot(argparse.Namespace(
+            file=str(data), method="lasso", nest_runs=2, boot_runs=1,
+            fdr=0.05, seed=1, zeta="0.01,0.1", output=str(tmp_path / "run.npy"), **options,
+        ))
+        return calls[0]
+
+    X, targets, alphas = run()
+    assert set(np.unique(targets)) == {0.0, 1.0} and np.allclose(alphas, [0.01, 0.1])
+    assert X.min() < -1 or X.max() > 1
+
+    X, targets, _ = run(no_design=True)
+    assert targets is X
+
+    X, targets, alphas = run(zeta_cutoff=True, alpha=1e-4)
+    assert set(np.unique(targets)) == {0.0, 1.0} and np.allclose(alphas, [1e-4])
+    assert X.min() >= -1 and X.max() <= 1
