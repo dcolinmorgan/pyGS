@@ -103,6 +103,20 @@ def _draw(
     return right
 
 
+def _zoom(ax: plt.Axes, freq: plt.Axes, xmin: float, rescale: bool = True) -> None:
+    """Start the support axis at ``xmin``; frequency is rescaled to the curves left in view."""
+    ax.set_xlim(xmin, ax.get_xlim()[1])
+    if not rescale:
+        return
+    shown = [
+        np.asarray(line.get_ydata(), dtype=float)[np.asarray(line.get_xdata(), dtype=float) >= xmin]
+        for line in freq.get_lines()
+    ]
+    top = max((float(np.nanmax(y)) for y in shown if len(y)), default=0.0)
+    if top > 0:
+        freq.set_ylim(0, top * 1.05)
+
+
 def _axes_points(ax: plt.Axes, lines: list) -> np.ndarray:
     """Points along every line in ``ax``'s axes fraction, dense enough to catch crossings."""
     to_axes = ax.transAxes.inverted()
@@ -151,7 +165,8 @@ ZOOMED = "0.86"
 
 
 def _plot_single(
-    table, zeta, output: Path, archive, links, inset: bool = True, min_support: float | None = None
+    table, zeta, output: Path, archive, links, inset: bool = True, min_support: float | None = None,
+    xmin: float | None = None,
 ) -> None:
     """One sparsity, with an inset showing the full frequency range unless ``inset`` is False.
 
@@ -159,7 +174,7 @@ def _plot_single(
     fewest lines; grey marks the frequency range the main panel zooms into.
     The legend is above the panel.
     """
-    from matplotlib.patches import Patch
+    from matplotlib.patches import Patch, Rectangle
 
     with plt.rc_context(SINGLE_STYLE):
         fig, ax = plt.subplots(figsize=(11, 8.2))
@@ -184,6 +199,8 @@ def _plot_single(
             )
             if min_support >= 1:
                 ax.set_xlim(0, 1.01)
+        if xmin is not None:
+            _zoom(ax, freq, xmin)
         for line in ax.get_lines() + freq.get_lines():
             line.set_linewidth(2.2)
         ax.set_xlabel("support")
@@ -207,7 +224,10 @@ def _plot_single(
             inset.set_facecolor("white")
             inset_freq = _draw(inset, part, cutoff, reached, label_cutoff=False, full=True)
             zoom_top = freq.get_ylim()[1] / inset_freq.get_ylim()[1] * inset.get_ylim()[1]
-            inset.axhspan(0, zoom_top, color=ZOOMED, lw=0, zorder=0)
+            x_lo = 0.0 if xmin is None else xmin
+            inset.add_patch(Rectangle(
+                (x_lo, 0), inset.get_xlim()[1] - x_lo, zoom_top, color=ZOOMED, lw=0, zorder=0,
+            ))
             for axis, label in ((inset, "overlap"), (inset_freq, "frequency")):
                 axis.set_ylabel(label, fontsize=13)
                 axis.tick_params(labelsize=11)
@@ -243,10 +263,11 @@ def plot_support(
     inset: bool = True,
     min_support: float | None = None,
     full_range: bool = False,
+    xmin: float | None = None,
 ) -> None:
     zetas = [float(value) for value in np.sort(table["zeta"].unique())]
     if zeta is not None or len(zetas) == 1:
-        _plot_single(table, zetas[0] if zeta is None else zeta, output, archive, links, inset, min_support)
+        _plot_single(table, zetas[0] if zeta is None else zeta, output, archive, links, inset, min_support, xmin)
         return
     cols = min(3, len(zetas))
     rows = int(np.ceil(len(zetas) / cols))
@@ -256,6 +277,8 @@ def plot_support(
     for i, (ax, value) in enumerate(zip(axes.ravel(), zetas)):
         chosen, part, cutoff, reached, n_links = _slice(table, value, archive, links)
         freq = _draw(ax, part, cutoff, reached, label_cutoff=False, full=full_range)
+        if xmin is not None:
+            _zoom(ax, freq, xmin, rescale=not full_range)
         if first_freq is None:
             first_freq = freq
         status = f"cutoff {cutoff:.2f}" if reached else "not FDR-controlled"
@@ -351,11 +374,15 @@ def main() -> None:
         "--full-range", action="store_true",
         help="Without --zeta, give every panel the frequency range 0-1, as in the inset, so panels share one scale",
     )
+    parser.add_argument(
+        "--xmin", type=float, default=None,
+        help="Start the support axis here, e.g. 0.8 to zoom into the tail. Frequency is rescaled to what is shown",
+    )
     args = parser.parse_args()
     table, archive, links = support_table(args.run)
     plot_support(
         table, args.zeta, args.output, archive, links,
-        inset=not args.no_inset, min_support=args.min_support, full_range=args.full_range,
+        inset=not args.no_inset, min_support=args.min_support, full_range=args.full_range, xmin=args.xmin,
     )
 
 
