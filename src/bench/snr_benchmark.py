@@ -138,20 +138,23 @@ def _tiers(args: argparse.Namespace) -> list[str]:
 
 
 def _methods(args: argparse.Namespace) -> list[str]:
+    """Tier or ``--methods``, keeping sparselink methods and the local z-score method.
+
+    ``--methods`` replaces the tier. Other pyGS-only methods are left out: this
+    runner scores them only when ``infer_stack`` knows them, which today is z-score.
+    """
+    import sparselink.methods  # noqa: F401
     from sparselink import list_methods
 
-    import sparselink.methods  # noqa: F401
-    from bench.genespider import TIERS
+    from bench.cli import _resolve_methods
 
-    if getattr(args, "methods", None):
-        names = [name.strip() for name in args.methods.split(",") if name.strip()]
-    else:
-        names = []
-        for tier in _tiers(args):
-            names.extend(TIERS.get(tier, []))
-    names.extend(getattr(args, "extra_methods", None) or [])
+    names = _resolve_methods(
+        getattr(args, "tier", None) or "",
+        list(getattr(args, "extra_methods", None) or []),
+        getattr(args, "methods", None),
+    )
     registered = set(list_methods())
-    return [name for name in dict.fromkeys(names) if name in registered]
+    return [name for name in names if name in registered or name == "zscore"]
 
 
 def use_nestboot(args: argparse.Namespace) -> bool:
@@ -256,6 +259,10 @@ def infer_stack(
         from methods.tigress import TIGRESS
 
         stack, used = TIGRESS(dataset, random_state=seed)
+    elif method_name == "zscore":
+        from methods.zscore import ZScore
+
+        stack, used = ZScore(dataset)
     else:
         from sparselink import get_method
 

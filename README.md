@@ -65,10 +65,16 @@ pygs infer data.csv -m lasso -o adj.npy           # infer a network
 
 # Benchmarking
 pygs bench --data sparselink --tier fast          # sparselink synthetic benchmark
-pygs bench --data stored --tier fast --sizes N50  # stored GeneSPIDER data, every SNR_L
+pygs bench --methods lasso,lsco                   # only these methods (also on bench-gs)
+pygs bench-gs --methods lasso,lsco --sizes N10    # saved GeneSPIDER data, selected methods
+pygs bench --data stored --tier fast --sizes N50  # saved GeneSPIDER data, every SNR_L
 pygs bench --data stored --tier fast --nestboot --sizes N50 --plot -o gs.png   # direct vs NestBoot
 pygs bench --data generated --methods tigress,lasso,lsco --nestboot --snr 0.01,0.1,1 --n-nodes 10 --plot -o fig.png
-# pygs bench-gs ... is the same as pygs bench --data stored
+# pygs bench-gs is pygs bench --data stored: saved GeneSPIDER files, not a new experiment
+
+# Synthetic networks. --replicates is how many independent networks to write.
+# SNR_L 1 is the middle stored level (those files are named SNR1000).
+pygs generate --n-genes 20 --snr 1 --replicates 5 --network-out net.npy --data-out expr.npy
 
 # NestBoot FDR
 pygs nestboot expr.csv -m lasso --fdr 0.05        # bootstrap FDR-controlled inference
@@ -135,6 +141,7 @@ All sparselink methods implement `InferenceMethod.fit(X) -> InferenceResult`.
 |----------|---------|
 | Integrative GRN | PANDA (netZooPy) |
 | Multi-omic GRN | SCENIC+ |
+| Perturbation | Z-score (DREAM / GeneSPIDER; in the fast benchmark tier) |
 
 pyGS methods accept `Dataset` objects (with perturbation matrix P) and are available
 in the interactive CLI and benchmarks. Install extras: `pip install pyGS[netzoo]` or `pip install pyGS[scenic]`.

@@ -42,7 +42,7 @@ SIZES = ["N10", "N50", "N100"]
 TIERS: dict[str, list[str]] = {
     "fast": [
         "lasso", "lsco", "elastic_net", "ridge", "partial_correlation",
-        "clr", "genie3", "neighborhood_selection",
+        "clr", "genie3", "neighborhood_selection", "zscore",
     ],
     "medium": [
         "glasso", "bdeu", "bge", "granger_causality",
@@ -53,8 +53,18 @@ TIERS: dict[str, list[str]] = {
     "scenicplus": ["scenicplus"],
 }
 
-# Methods handled by pyGS directly (not sparselink)
-PYGS_METHODS: set[str] = {"scenicplus", "panda"}
+# Methods handled by pyGS directly (not sparselink).
+# zscore is the perturbation Z-score GRN method (DREAM / GeneSPIDER).
+PYGS_METHODS: set[str] = {"scenicplus", "panda", "zscore"}
+
+
+def tier_listing() -> str:
+    """Help text: which methods each ``--tier`` name expands to."""
+    lines = ["Methods in each tier:"]
+    for name, members in TIERS.items():
+        lines.append(f"  {name}: {', '.join(members)}")
+    lines.append("  nestboot: wraps the selected methods, except tigress")
+    return "\n".join(lines)
 
 # Scored directly but never wrapped in NestBoot, with the reason shown in the TUI
 NESTBOOT_EXCLUDED: dict[str, str] = {
@@ -406,6 +416,14 @@ def _fit_pygs_method(method_name: str, X: np.ndarray, A_true: np.ndarray, P: np.
         elapsed = time.perf_counter() - t0
         np.fill_diagonal(adj, 0.0)
         return np.abs(adj), elapsed
+    elif method_name == "zscore":
+        from methods.zscore import ZScore
+        t0 = time.perf_counter()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            adj, _ = ZScore(data_obj)
+        elapsed = time.perf_counter() - t0
+        return np.asarray(adj, dtype=float), elapsed
     else:
         raise ValueError(f"Unknown pyGS method: {method_name}")
 

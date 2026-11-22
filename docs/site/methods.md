@@ -14,6 +14,7 @@ All methods implement the unified `InferenceMethod.fit(X) -> InferenceResult` in
 | GENIE3 | `genie3` | Tree-based | Yes | — | Non-linear relationships |
 | Partial Correlation | `partial_correlation` | Correlation | No | — | Undirected Gaussian |
 | CLR | `clr` | Information theory | No | — | Mutual information + z-score |
+| Z-score | `zscore` | Perturbation | Yes | — | DREAM/GeneSPIDER perturbation z-scores |
 | Graphical Lasso | `graphical_lasso` | Graphical model | No | — | Sparse precision matrix |
 | GLASSO+StARS | `glasso_stars` | Graphical model | No | — | Auto-tuned graphical lasso |
 | Neighborhood Selection | `neighborhood_selection` | Graphical model | No | — | Meinshausen-Bühlmann |

@@ -228,7 +228,7 @@ def _cmd_pygs_status(args: argparse.Namespace) -> None:
 _MENU = {
     "1": ("status",    "Show system status & available methods"),
     "2": ("bench",     "Run synthetic benchmark (sparselink)"),
-    "3": ("bench-gs",  "Run GeneSpider benchmark (real data)"),
+    "3": ("bench-gs",  "Run GeneSpider benchmark (saved data)"),
     "4": ("dashboard", "Generate interactive HTML dashboard"),
     "5": ("show",      "Render a previous result JSON"),
 }
@@ -303,7 +303,7 @@ def main() -> None:
     bp.add_argument("--timeout", type=int, default=60)
     bp.add_argument("-o", "--output", default="benchmark_results.json")
 
-    gp = subs.add_parser("bench-gs", help="Run GeneSpider benchmark")
+    gp = subs.add_parser("bench-gs", help="Benchmark on saved GeneSPIDER data")
     gp.add_argument("--tier", default="fast")
     gp.add_argument("--sizes", default="N50")
     gp.add_argument("--max-datasets", type=int, default=0)

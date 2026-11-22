@@ -8,7 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- `pygs` CLI with interactive mode and subcommands (`status`, `methods`, `infer`, `bench`, `bench-gs`, `nestboot`, `evaluate`, `plot`, `show`, `dashboard`)
+- `pygs bench` and `pygs bench-gs` take `--methods lasso,lsco` to score that set instead of a whole tier. `pygs --help` and `pygs bench --help` list the methods in each tier. The fast tier includes `zscore`, the perturbation Z-score GRN method from the DREAM and GeneSPIDER benchmarks
+- `pygs generate` writes synthetic networks and expression without the menu. `--replicates N` writes N independent networks (seeds `seed`, `seed+1`, ...), numbered `net_r1.npy`, `net_r2.npy`, ... when N is more than 1. `--experiments-per-gene` is how many knockdown replicates each gene has inside one dataset (default 3). Menu option 2 asks for the same count
+- Every interactive menu action has a command: `status`, `methods`, `generate`, `infer` (`--source file`, `--source stored` or `--source synthetic`), `bench` (`--data generated`, `--data stored` or `--data sparselink`, and `--noise` for sparselink), `evaluate`, `plot`, `dashboard`, `show`
+- `pygs` CLI with interactive mode and subcommands (`status`, `methods`, `infer`, `bench`, `bench-gs`, `nestboot`, `evaluate`, `plot`, `show`, `dashboard`, `generate`)
 - GeneSpider live benchmark runner with Rich progress bars in the `pygs` CLI
 - NestBoot tier option in the interactive `bench-gs` wizard — select "nestboot" alongside method tiers to configure outer/inner runs and FDR threshold inline
 - `pygs nestboot --zeta` writes `<output>_support.tsv` (links per outer run, outer-run overlap and shuffled/measured tail ratio for each sparsity and support bin), and `<output>_support.npz` now holds the per-run support histograms and the FDR curve, so `nestboot_report/plot_support.py` can draw support curves from a new run
@@ -21,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `nestboot_report/plot_support.py --zeta Z` draws one sparsity with larger type, the legend above the panel and a full-range inset placed clear of the curves; `--no-inset` leaves the inset out. At a sparsity that misses 5% FDR it still marks the run's cutoff, labelled with the FDR reached there, and `--min-support S` also marks a stricter cutoff with its estimated FDR
 
 ### Fixed
+- Menu option 2 (and `pygs generate`) scales noise to the SNR_L you type. The prompt used to default to 1000 and treat that number as a variance ratio, so the value on screen was the filename scale: stored SNR_L 1 is the file `SNR1000`. A request of 1 is now SNR_L 1
+- The direct vs NestBoot figure no longer piles the paired-change labels on the SNR titles, or the method names on each other. Change labels sit in a band inside each panel, and long method names are drawn on two lines
+- `bench-gs` help text says saved GeneSPIDER data. The old wording called those files real data
+- The stored-data benchmark menu asks which SNR_L levels to score. Leave it blank to keep every stored level. The sparselink menu asks for the noise standard deviations (`--noise` on the command line)
 - `pygs` no longer prints sklearn's "`sklearn.utils.parallel.delayed` should be used with `sklearn.utils.parallel.Parallel`" warning once per tree when NestBoot fits genie3 in many threads. On Python < 3.14 each sklearn task clears the process-wide warning filters, so the CLI's ignore filter could not hold; the message is now dropped when printed
 - The same race let sklearn's `ConvergenceWarning` ("Objective did not converge") through once per LASSO or elastic net bootstrap fit at small regularisation values; it is dropped when printed too
 
