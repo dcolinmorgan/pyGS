@@ -1,8 +1,11 @@
-import pytest
+from unittest.mock import MagicMock
+
 import numpy as np
-from unittest.mock import MagicMock, patch
-from src.methods.lasso import Lasso
+import pytest
+
 from src.datastruct.Dataset import Dataset
+from src.methods.lasso import Lasso
+
 
 class TestLasso:
     @pytest.fixture
@@ -20,25 +23,25 @@ class TestLasso:
 
     def test_lasso_basic(self, synthetic_data):
         dataset, Y, P = synthetic_data
-        
+
         # Run Lasso
         # Use small alpha range for speed
         alpha_range = np.logspace(-4, -1, 5)
         Afit, alphas = Lasso(dataset, alpha_range=alpha_range)
-        
+
         # Check output shapes
         n_genes = Y.shape[0]
         assert Afit.shape == (n_genes, n_genes, 5)
         assert len(alphas) == 5
-        
+
     def test_lasso_input_validation(self):
         dataset = MagicMock(spec=Dataset)
         dataset.Y = np.random.rand(5, 10)
         dataset.P = None # Missing P
-        
+
         with pytest.raises(ValueError):
             Lasso(dataset)
-            
+
         dataset.P = np.random.rand(4, 10) # Mismatched dimensions
         with pytest.raises(ValueError):
             Lasso(dataset)

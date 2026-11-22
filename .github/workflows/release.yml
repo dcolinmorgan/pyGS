@@ -11,10 +11,8 @@ jobs:
       id-token: write
     strategy:
       matrix:
-        package: [sparselink, pyGS]
+        package: [pyGS]
         include:
-          - package: sparselink
-            path: sparselink
           - package: pyGS
             path: .
     steps:

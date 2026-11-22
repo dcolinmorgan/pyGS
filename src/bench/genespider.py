@@ -22,12 +22,10 @@ from typing import Any
 
 import numpy as np
 import requests
-
+import sparselink.methods  # noqa: F401
 from sparselink import list_methods
 from sparselink.bench.metrics import evaluate
 from sparselink.registry import get_method
-
-import sparselink.methods  # noqa: F401
 
 DATASET_COMMIT = "d2047430263f5ffe473525c74b4318f723c23b0e"
 NETWORK_COMMIT = "0b3a66e67d776eadaa5d68667ad9c8fbac12ef85"
@@ -349,8 +347,8 @@ def _fit_best(method_name: str, X: np.ndarray, A_true: np.ndarray, P: np.ndarray
 
 def _fit_pygs_method(method_name: str, X: np.ndarray, A_true: np.ndarray, P: np.ndarray | None = None) -> tuple:
     """Fit a pyGS-native method (e.g., SCENIC+). Returns (best_adj, elapsed)."""
-    from datastruct.Dataset import Dataset
     from analyze.Data import Data
+    from datastruct.Dataset import Dataset
 
     n_genes = X.shape[1]
     n_samples = X.shape[0]

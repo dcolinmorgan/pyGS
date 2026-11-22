@@ -138,9 +138,9 @@ def _tiers(args: argparse.Namespace) -> list[str]:
 
 
 def _methods(args: argparse.Namespace) -> list[str]:
+    import sparselink.methods  # noqa: F401
     from sparselink import list_methods
 
-    import sparselink.methods  # noqa: F401
     from bench.genespider import TIERS
 
     if getattr(args, "methods", None):

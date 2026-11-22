@@ -1028,8 +1028,9 @@ class Nestboot:
                 "using plain bootstrap draws from then on"
             )
 
-        from datastruct.Dataset import Dataset
         from threadpoolctl import threadpool_limits
+
+        from datastruct.Dataset import Dataset
 
         def _call(data_obj: Data) -> np.ndarray:
             if callable(inference_method) and method_params:

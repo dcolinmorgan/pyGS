@@ -1,17 +1,18 @@
-import pytest
 import numpy as np
-from datastruct.Network import Network
+
 from analyze.Model import Model
+from datastruct.Network import Network
+
 
 def test_model_init():
     A = np.eye(3)
     net = Network(A)
     model = Model(net)
-    
+
     assert model.network == net.network
     assert model.interampatteness == 1.0  # cond(I) = 1
     assert model.networkComponents == 3   # 3 disconnected nodes with self-loops
-    
+
 def test_model_properties():
     # Create a simple directed graph: 0 -> 1 -> 2
     A = np.zeros((3, 3))
@@ -19,7 +20,7 @@ def test_model_properties():
     A[2, 1] = 1
     net = Network(A)
     model = Model(net)
-    
+
     assert model.networkComponents == 3 # Strongly connected components: {0}, {1}, {2}
     # Path lengths: 0->1 (1), 1->2 (1), 0->2 (2). Others inf.
     # Model implementation handles inf?
@@ -28,8 +29,8 @@ def test_model_properties():
     # Median: 1. Mean: 1.333
     assert model.medianPathLength == 1.0
     assert np.isclose(model.meanPathLength, 4/3)
-    
-    assert model.DD == 2/3 # Mean degree. In+Out. 
+
+    assert model.DD == 2/3 # Mean degree. In+Out.
     # Node 0: Out=1, In=0 -> 1
     # Node 1: Out=1, In=1 -> 2
     # Node 2: Out=0, In=1 -> 1
@@ -52,7 +53,7 @@ def test_model_clustering():
     A[0, 2] = 1
     net = Network(A)
     model = Model(net)
-    
+
     # Clustering coefficient for directed graph?
     # Model uses custom implementation or networkx.
     # Custom: sum(sub_A) / (k*(k-1))

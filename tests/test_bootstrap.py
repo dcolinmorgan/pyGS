@@ -1,9 +1,9 @@
-from typing import Any
-import pytest
 import numpy as np
-from pathlib import Path
-from methods.nestboot import Nestboot, NetworkData
+import pytest
+
 from bootstrap.utils import NetworkUtils
+from methods.nestboot import Nestboot, NetworkData
+
 
 def test_pyGS_initialization() -> None:
     """Test NetworkBootstrap class initialization."""
@@ -24,10 +24,10 @@ def test_matrix_operations() -> None:
         [False, True, False],
         [True, True, False]
     ])
-    
+
     result_or = NetworkUtils.matrix_or(test_matrix)
     result_and = NetworkUtils.matrix_and(test_matrix)
-    
+
     assert isinstance(result_or, np.ndarray)
     assert isinstance(result_and, np.ndarray)
 
@@ -41,7 +41,7 @@ def test_calc_bin_freq(
     expected_bins: int
 ) -> None:
     """Test frequency binning calculation.
-    
+
     Args:
         matrix: Test input matrix
         init: Number of bins
@@ -49,4 +49,4 @@ def test_calc_bin_freq(
     """
     freq, bins = NetworkUtils.calc_bin_freq(matrix, init)
     assert len(bins) == expected_bins
-    assert np.isclose(np.sum(freq), 1.0) 
+    assert np.isclose(np.sum(freq), 1.0)

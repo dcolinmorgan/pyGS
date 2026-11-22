@@ -7,7 +7,12 @@ import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
-from bio.knockdown import drop_failed_knockdowns, fill_dropouts, knockdown_z, scale_genes
+from bio.knockdown import (
+    drop_failed_knockdowns,
+    fill_dropouts,
+    knockdown_z,
+    scale_genes,
+)
 
 
 def _design(n_genes: int, reps: int = 2) -> np.ndarray:

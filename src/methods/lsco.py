@@ -2,9 +2,9 @@
 
 import numpy as np
 from numpy import linalg
+from sparselink import get_method
 
 from datastruct.Dataset import Dataset
-from sparselink import get_method
 
 
 def LSCO(

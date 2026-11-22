@@ -53,17 +53,17 @@ def run_direct(method_name, X, P, A_true):
 
 def run_nestboot(method_name, X, P, A_true, gene_names):
     """Run method through NestBoot."""
+    from sparselink import get_method
+    from sparselink.bench.metrics import evaluate
+
+    from analyze.Data import Data
+    from bench.genespider import ALPHA_SWEEP
     from config import AnalysisConfig
     from datastruct.Dataset import Dataset
     from datastruct.Network import Network
-    from analyze.Data import Data
     from methods.nestboot import Nestboot
-    from sparselink import get_method
-    from sparselink.bench.metrics import evaluate
-    from bench.genespider import ALPHA_SWEEP
 
     n_genes = X.shape[1]
-    n_samples = X.shape[0]
 
     ds = Dataset()
     ds._Y = X.T

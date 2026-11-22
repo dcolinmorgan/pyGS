@@ -1,9 +1,9 @@
 """LASSO network inference — delegates to sparselink."""
 
 import numpy as np
+from sparselink import get_method
 
 from datastruct.Dataset import Dataset
-from sparselink import get_method
 
 
 def Lasso(

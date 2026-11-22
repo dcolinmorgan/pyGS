@@ -17,8 +17,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
-import time
 from dataclasses import asdict
 from pathlib import Path
 
@@ -32,14 +30,22 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 from rich.prompt import Prompt
-from rich.table import Table
 from rich.tree import Tree
 
 # Reuse sparselink TUI components
 from sparselink.tui import (
-    BOLD, DIM, GREEN, INDIGO, ORANGE, ROSE, TEAL, TEXT,
-    _bar, _cmd_dashboard, _cmd_show, _cmd_status, _color,
-    _configure_synthetic, _pick_multi, _render_results,
+    BOLD,
+    DIM,
+    GREEN,
+    INDIGO,
+    ROSE,
+    TEAL,
+    _cmd_dashboard,
+    _cmd_show,
+    _cmd_status,
+    _configure_synthetic,
+    _pick_multi,
+    _render_results,
     _run_benchmark_live,
 )
 
@@ -113,11 +119,16 @@ def _run_genespider_live(args: argparse.Namespace) -> None:
     import warnings
     warnings.simplefilter("ignore")
 
-    from bench.genespider import (
-        TIERS, PYGS_METHODS, _list_datasets, load_dataset, run_single,
-    )
-    from sparselink import list_methods
     import sparselink.methods  # noqa: F401
+    from sparselink import list_methods
+
+    from bench.genespider import (
+        PYGS_METHODS,
+        TIERS,
+        _list_datasets,
+        load_dataset,
+        run_single,
+    )
 
     selected_tiers = [t.strip() for t in args.tier.split(",") if t.strip()]
     use_nestboot = "nestboot" in selected_tiers
@@ -209,7 +220,7 @@ def _cmd_pygs_status(args: argparse.Namespace) -> None:
         n = len(list(cache.glob("*.json")))
         tree.add(f"[{GREEN}]✓[/] GeneSpider cache: {n} files")
     else:
-        tree.add(f"[dim]○[/] No GeneSpider cache (auto-downloaded on first run)")
+        tree.add("[dim]○[/] No GeneSpider cache (auto-downloaded on first run)")
 
     # Check pyGS modules
     mods = tree.add("pyGS modules")
