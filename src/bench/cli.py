@@ -1614,44 +1614,76 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
     method_cls = get_method(method_name)
 
     use_P = method_name in PERTURBATION_METHODS
-    # GeneSPIDER's NestBoot LSCO (rawZeta = 1) cuts |coefficient| <= zeta on Y
-    # rescaled to [-1, 1] over the whole matrix, so a zeta grid means the same
-    # sparsities on any data scale.
-    rescale = zeta is not None and method_name == "lsco"
+    # GeneSPIDER rawZeta = 1, shared by LSCO and ridgeco: cut |coefficient|
+    # on Y rescaled to [-1, 1], so one zeta grid is one sparsity scale.
+    rescale = zeta is not None and method_name in {"lsco", "ridge"}
     y_lo, y_hi = float(matrix.min()), float(matrix.max())
-    if rescale:
+    if rescale and method_name == "lsco":
         console.print(f"  [{DIM}]LSCO cutoff |coef| ≤ zeta, with Y rescaled to [-1, 1][/]")
+    if rescale and method_name == "ridge":
+        console.print(
+            f"  [{DIM}]RidgeCO: ridge of P on Y, cutoff |coef| ≤ zeta, "
+            f"Y rescaled to [-1, 1][/]"
+        )
 
-    def _infer(dataset: Data, **kwargs: object) -> np.ndarray:
-        """Run sparselink method on a pyGS Data object."""
-        Y = dataset.data.Y  # type: ignore[union-attr]
-        if rescale:
-            Y = 2 * (Y - y_lo) / (y_hi - y_lo) - 1
-        X = Y.T  # sparselink expects (samples × features)
-        fit_P = None
-        if use_P:
-            P_mat = dataset.data.P  # type: ignore[union-attr]
-            fit_P = None if P_mat is None else P_mat.T
-        result = method_cls().fit(X, fit_P)
-        adj = result.adjacency_matrix
-        # A dense fit is scored by which links pass each cutoff. --zeta supplies
-        # those cutoffs; otherwise use a short quantile sweep.
+    def _cutoff_stack(adj: np.ndarray, thresholds: np.ndarray) -> np.ndarray:
+        """One network per cutoff. An empty fit is still one all-zero slice each."""
         scores = np.abs(adj)
         np.fill_diagonal(scores, 0.0)
-        nonzero = scores[scores > 0]
-        if nonzero.size == 0:
-            return adj
-        thresholds = zeta if zeta is not None else np.unique(
-            np.quantile(nonzero, np.linspace(0.5, 0.95, 8))
-        )
         slices = []
         for thr in thresholds:
-            masked = adj.copy()
+            masked = np.array(adj, dtype=float, copy=True)
             masked[scores <= thr] = 0.0
             slices.append(masked)
         if len(slices) == 1:
             return slices[0]
         return np.stack(slices, axis=2)
+
+    def _infer(dataset: Data, **kwargs: object) -> np.ndarray:
+        """Run sparselink method on a pyGS Data object."""
+        Y = dataset.data.Y  # type: ignore[union-attr]
+        if rescale:
+            span = y_hi - y_lo
+            Y = Y if span == 0 else 2 * (Y - y_lo) / span - 1
+        if method_name == "ridge":
+            # Self-regression of Y is symmetric, so both directions of every
+            # link survive together. ridgeco regresses the perturbation on Y.
+            from methods.ridge import RidgeCO
+
+            saved = dataset.data.Y
+            dataset.data.Y = np.asarray(Y, dtype=float)
+            try:
+                penalties = zeta if zeta is not None else np.logspace(-4, 0, 16)
+                weights, _used = RidgeCO(
+                    dataset, threshold_range=zeta, penalties=penalties
+                )
+            finally:
+                dataset.data.Y = saved
+            if zeta is not None:
+                return np.asarray(weights, dtype=float)
+            adj = np.asarray(weights, dtype=float)
+        else:
+            X = Y.T  # sparselink expects (samples × features)
+            fit_P = None
+            if use_P:
+                P_mat = dataset.data.P  # type: ignore[union-attr]
+                fit_P = None if P_mat is None else P_mat.T
+            result = method_cls().fit(X, fit_P)
+            adj = result.adjacency_matrix
+        # A dense fit is scored by which links pass each cutoff. --zeta supplies
+        # those cutoffs; otherwise use a short quantile sweep. The sweep length
+        # stays fixed when the fit has no off-diagonal weight, which is what
+        # LASSO returns on gene-shuffled data at the default penalty.
+        scores = np.abs(adj)
+        np.fill_diagonal(scores, 0.0)
+        nonzero = scores[scores > 0]
+        if zeta is not None:
+            thresholds = zeta
+        elif nonzero.size == 0:
+            thresholds = np.zeros(8)
+        else:
+            thresholds = np.unique(np.quantile(nonzero, np.linspace(0.5, 0.95, 8)))
+        return _cutoff_stack(np.asarray(adj, dtype=float), thresholds)
 
     # Run NestBoot
     config = AnalysisConfig(
@@ -2840,7 +2872,8 @@ def main() -> None:
     nb.add_argument(
         "--zeta",
         default=None,
-        help="LSCO sparsity grid. -4:0:41 is logspace from 1e-4 to 1 with 41 steps. A comma list is used as written",
+        help="Cutoff grid for LSCO and ridgeco, and the post-hoc cutoff for other methods. "
+        "-4:0:41 is logspace from 1e-4 to 1 with 41 steps. A comma list is used as written",
     )
     nb.add_argument(
         "--table-zeta",
