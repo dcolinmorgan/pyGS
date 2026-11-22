@@ -5,6 +5,7 @@ from .genie3 import GENIE3
 from .lasso import Lasso
 from .lsco import LSCO
 from .tigress import TIGRESS
+from .zscore import ZScore
 
 try:
     from .scenicplus import SCENICPLUS
@@ -48,6 +49,7 @@ def run(
             "clr": CLR,
             "genie3": GENIE3,
             "tigress": TIGRESS,
+            "zscore": ZScore,
         }
         if SCENICPLUS is not None:
             method_map["scenicplus"] = SCENICPLUS
@@ -78,4 +80,4 @@ def run(
         return method(dataset, **kwargs)
 
 
-__all__ = ["Lasso", "LSCO", "CLR", "GENIE3", "TIGRESS", "SCENICPLUS", "PANDA", "run"]
+__all__ = ["Lasso", "LSCO", "CLR", "GENIE3", "TIGRESS", "ZScore", "SCENICPLUS", "PANDA", "run"]

@@ -419,14 +419,42 @@ def _cmd_methods(args: argparse.Namespace) -> None:
 
     for m in sorted(list_methods()):
         t.add_row(m, METHOD_CATEGORIES.get(m, ""))
+    t.add_row("zscore", "perturbation z-score")
     console.print(t)
+    from bench.genespider import tier_listing
+
+    console.print()
+    console.print(tier_listing())
 
 
 # ── Infer ─────────────────────────────────────────────────────────────────
 
 
 def _cmd_infer(args: argparse.Namespace) -> None:
-    """Infer a network from a data file using a sparselink method."""
+    """Infer a network from a file, a stored GeneSPIDER dataset, or new data."""
+    source = getattr(args, "source", None)
+    if source == "stored":
+        _infer_from_genespider(args)
+        return
+    if source == "synthetic":
+        from bench.generate import generate_replicates
+
+        drawn = generate_replicates(
+            n_genes=args.n_genes,
+            topology=args.topology,
+            sparsity=args.sparsity,
+            snr=1.0 if args.snr is None else args.snr,
+            seed=args.seed,
+            replicates=max(1, args.replicates),
+        )
+        _print_generated(drawn)
+        adjacency = _report_inference(args.method, drawn[0])
+        if args.output:
+            np.save(args.output, adjacency)
+            console.print(f"  [{DIM}]Adjacency saved to {args.output}[/]")
+        return
+    if not getattr(args, "file", None):
+        raise SystemExit("infer needs a data file, or --source stored, or --source synthetic")
     warnings.simplefilter("ignore")
     from sparselink import get_method
 
@@ -502,13 +530,19 @@ def _cmd_infer(args: argparse.Namespace) -> None:
 METHOD_TIERS: dict[str, str] = {"1": "fast", "2": "medium", "3": "slow", "4": "very_slow"}
 
 
+def _tier_menu_line(number: str, name: str) -> None:
+    from bench.genespider import TIERS
+
+    console.print(f"    [{INDIGO}]{number}[/] [{DIM}]{name} ({', '.join(TIERS[name])})[/]")
+
+
 def _pick_benchmark_methods() -> dict[str, Any]:
     """Tiers, extra methods and NestBoot settings, the same for every data source."""
     console.print(f"  [{TEAL}]A) Methods[/]")
-    console.print(f"    [{INDIGO}]1[/] [{DIM}]fast (lasso, lsco, elastic_net, ridge, partial_correlation, clr, genie3, neighborhood_selection)[/]")
-    console.print(f"    [{INDIGO}]2[/] [{DIM}]medium (glasso, bdeu, bge, granger_causality, transfer_entropy, pcmci)[/]")
-    console.print(f"    [{INDIGO}]3[/] [{DIM}]slow (tigress, glasso_stars, pc, fci)[/]")
-    console.print(f"    [{INDIGO}]4[/] [{DIM}]very_slow (notears, dag_gnn)[/]")
+    _tier_menu_line("1", "fast")
+    _tier_menu_line("2", "medium")
+    _tier_menu_line("3", "slow")
+    _tier_menu_line("4", "very_slow")
     console.print(f"    [{INDIGO}]5[/] [{DIM}]nestboot (also run each selected method through NestBoot)[/]")
     console.print(f"    [{INDIGO}]6[/] [{DIM}]tigress (scored directly; never wrapped in NestBoot)[/]")
     console.print(f"    [{DIM}]Or type method names directly: scenicplus, genie3, ...[/]")
@@ -543,17 +577,28 @@ def _pick_benchmark_methods() -> dict[str, Any]:
     }
 
 
-def _resolve_methods(tier: str, extra_methods: list[str]) -> list[str]:
-    """Tier members plus named methods, registered ones only, without repeats."""
+def _resolve_methods(
+    tier: str,
+    extra_methods: list[str] | None = None,
+    methods: str | None = None,
+) -> list[str]:
+    """``--methods`` if given, otherwise the tier, plus any extra names.
+
+    Registered sparselink methods and pyGS methods, without repeats.
+    ``--methods`` replaces the tier; it does not add to it.
+    """
     from bench.genespider import PYGS_METHODS, TIERS
     from sparselink import list_methods
 
     import sparselink.methods  # noqa: F401
 
-    names: list[str] = []
-    for name in (t.strip() for t in tier.split(",")):
-        names.extend(TIERS.get(name, []))
-    names.extend(extra_methods)
+    if methods:
+        names = [part.strip() for part in methods.split(",") if part.strip()]
+    else:
+        names = []
+        for name in (part.strip() for part in (tier or "").split(",")):
+            names.extend(TIERS.get(name, []))
+    names.extend(extra_methods or [])
     registered = set(list_methods())
     return [m for m in dict.fromkeys(names) if m in registered or m in PYGS_METHODS]
 
@@ -572,6 +617,10 @@ def _configure_synthetic() -> argparse.Namespace:
     output = Prompt.ask(
         f"  [{DIM}]Output file[/]", default="benchmark_results.json"
     )
+    noise = Prompt.ask(
+        f"  [{DIM}]Noise std, comma-separated (sparselink has no SNR_L)[/]",
+        default="0.01,0.1,1",
+    )
 
     console.print()
     return argparse.Namespace(
@@ -582,6 +631,7 @@ def _configure_synthetic() -> argparse.Namespace:
         seed=42,
         timeout=timeout,
         output=output,
+        noise=noise,
     )
 
 
@@ -843,6 +893,7 @@ def _configure_snr_figure(simulate: bool = False) -> argparse.Namespace:
 
 RUN_OPTIONS = (
     "data", "snr", "methods", "tier", "nestboot", "randomize", "max_datasets", "max_networks",
+    "noise",
 )
 BENCH_DATA = ("stored", "generated", "sparselink")
 
@@ -902,10 +953,19 @@ def _run_benchmark_live(args: argparse.Namespace) -> None:
 
     from bench.genespider import NESTBOOT_EXCLUDED, PYGS_METHODS
 
-    methods = [
-        m for m in _resolve_methods(args.tier, list(getattr(args, "extra_methods", [])))
-        if m not in PYGS_METHODS
-    ]
+    selected = _resolve_methods(
+        args.tier,
+        list(getattr(args, "extra_methods", None) or []),
+        getattr(args, "methods", None),
+    )
+    perturbation_only = [m for m in selected if m in PYGS_METHODS]
+    methods = [m for m in selected if m not in PYGS_METHODS]
+    if perturbation_only and getattr(args, "methods", None):
+        console.print(
+            f"  [{DIM}]{', '.join(perturbation_only)} uses the perturbation design. "
+            "It is not run on sparselink data; use --data generated or --data stored.[/]"
+        )
+    noise_levels = _parse_noise(getattr(args, "noise", None))
     use_nestboot = bool(getattr(args, "nestboot", False))
     nb_methods = [m for m in methods if m not in NESTBOOT_EXCLUDED] if use_nestboot else []
     if not methods:
@@ -913,7 +973,6 @@ def _run_benchmark_live(args: argparse.Namespace) -> None:
         return
 
     sparsities = [0.02, 0.06, 0.1]
-    noise_levels = [0.01, 0.1, 1.0]
     topologies = ["random", "scalefree", "smallworld"]
     total = (
         (len(methods) + len(nb_methods))
@@ -1031,6 +1090,13 @@ def _run_benchmark_live(args: argparse.Namespace) -> None:
 # ── GeneSpider benchmark ─────────────────────────────────────────────────
 
 
+def _parse_noise(text: str | None) -> list[float]:
+    """Sparselink noise standard deviations. Blank keeps 0.01, 0.1 and 1."""
+    if not text or not str(text).strip():
+        return [0.01, 0.1, 1.0]
+    return [float(part) for part in str(text).split(",") if part.strip()]
+
+
 def _configure_genespider() -> argparse.Namespace:
     """Interactive config builder for the NestBoot benchmark on GeneSPIDER data."""
     console.print(f"\n  [{TEAL}]Configure NestBoot Benchmark (GeneSPIDER data)[/]\n")
@@ -1045,7 +1111,20 @@ def _configure_genespider() -> argparse.Namespace:
     )
     sizes_str = ",".join(sizes) if sizes else "N50"
 
-    console.print(f"\n  [{TEAL}]C) Networks per size, each scored at SNR_L 0.01, 1 and 100[/]")
+    console.print(f"\n  [{TEAL}]C) SNR_L[/]")
+    console.print(
+        f"    [{DIM}]Stored files are SNR_L 0.01, 1 and 100"
+        f" (filenames SNR10, SNR1000, SNR100000).[/]"
+    )
+    snr = Prompt.ask(
+        f"  [{DIM}]SNR_L values, comma-separated (blank = every stored level; one size)[/]",
+        default="",
+    ).strip()
+    if snr and "," in sizes_str:
+        console.print(f"  [{DIM}]SNR_L selection uses one size; keeping {sizes_str.split(',')[0]}.[/]")
+        sizes_str = sizes_str.split(",")[0]
+
+    console.print(f"\n  [{TEAL}]D) Networks per size[/]")
     max_networks = int(Prompt.ask(f"  [{DIM}]0 = all[/]", default="5"))
 
     timeout = int(
@@ -1066,10 +1145,12 @@ def _configure_genespider() -> argparse.Namespace:
         sizes=sizes_str,
         max_datasets=0,
         max_networks=max_networks,
+        n_datasets=max_networks,
         timeout=timeout,
         output=output,
         seed=42,
         figure=figure == "y",
+        snr=snr or None,
     )
 
 
@@ -2089,43 +2170,66 @@ def _interactive_infer() -> None:
         _infer_from_synthetic()
 
 
-def _infer_from_genespider() -> None:
+def _stored_filename_snr(value: float) -> int:
+    """Map SNR_L (0.01, 1, 100) or a filename SNR (10, 1000, 100000) to the file."""
+    from bench.genespider import VALID_SNRS
+
+    scaled = int(round(float(value) * 1000))
+    if scaled in VALID_SNRS:
+        return scaled
+    direct = int(round(float(value)))
+    if direct in VALID_SNRS:
+        return direct
+    known = ", ".join(f"{level / 1000:g}" for level in sorted(VALID_SNRS))
+    raise SystemExit(f"No stored file for SNR {value}. Stored SNR_L levels: {known}")
+
+
+def _infer_from_genespider(preset: argparse.Namespace | None = None) -> None:
     """Load a GeneSpider dataset and run inference on it."""
     from bench.genespider import TOPOLOGIES, VALID_SNRS, _list_datasets, load_dataset
 
-    console.print(f"\n  [{TEAL}]GeneSpider dataset selector[/]")
+    if preset is None:
+        console.print(f"\n  [{TEAL}]GeneSpider dataset selector[/]")
 
-    # Size selection (multiple)
-    raw_sizes = Prompt.ask(
-        f"  [{DIM}]Network size(s) (comma-separated)[/]",
-        default="N50",
-    )
-    sizes = [s.strip() for s in raw_sizes.split(",") if s.strip() in ("N10", "N50", "N100")]
-    if not sizes:
-        sizes = ["N50"]
+        raw_sizes = Prompt.ask(
+            f"  [{DIM}]Network size(s) (comma-separated)[/]",
+            default="N50",
+        )
+        sizes = [s.strip() for s in raw_sizes.split(",") if s.strip() in ("N10", "N50", "N100")]
+        if not sizes:
+            sizes = ["N50"]
 
-    # SNR
-    snrs = sorted(VALID_SNRS)
-    console.print(f"\n  [{TEAL}]SNR:[/]")
-    for i, s in enumerate(snrs, 1):
-        console.print(f"    [{INDIGO}]{i}[/] [{DIM}]{s}[/]")
-    snr_idx = int(Prompt.ask(f"  [{DIM}]SNR[/]", default="2")) - 1
-    snr_idx = max(0, min(snr_idx, len(snrs) - 1))
-    chosen_snr = snrs[snr_idx]
+        # Filename SNR is SNR_L × 1000 (SNR1000 is SNR_L 1). Ask in SNR_L.
+        snrs = sorted(VALID_SNRS)
+        console.print(f"\n  [{TEAL}]SNR_L:[/]")
+        for i, filename_snr in enumerate(snrs, 1):
+            console.print(
+                f"    [{INDIGO}]{i}[/] [{DIM}]{filename_snr / 1000:g}"
+                f" (file SNR{filename_snr})[/]"
+            )
+        snr_idx = int(Prompt.ask(f"  [{DIM}]SNR_L[/]", default="2")) - 1
+        snr_idx = max(0, min(snr_idx, len(snrs) - 1))
+        chosen_snr = snrs[snr_idx]
 
-    # Topology
-    console.print(f"\n  [{TEAL}]Topology:[/]")
-    for i, t in enumerate(TOPOLOGIES, 1):
-        console.print(f"    [{INDIGO}]{i}[/] [{DIM}]{t}[/]")
-    topo_idx = int(Prompt.ask(f"  [{DIM}]Topology[/]", default="2")) - 1
-    topo_idx = max(0, min(topo_idx, len(TOPOLOGIES) - 1))
-    chosen_topo = TOPOLOGIES[topo_idx]
+        console.print(f"\n  [{TEAL}]Topology:[/]")
+        for i, t in enumerate(TOPOLOGIES, 1):
+            console.print(f"    [{INDIGO}]{i}[/] [{DIM}]{t}[/]")
+        topo_idx = int(Prompt.ask(f"  [{DIM}]Topology[/]", default="2")) - 1
+        topo_idx = max(0, min(topo_idx, len(TOPOLOGIES) - 1))
+        chosen_topo = TOPOLOGIES[topo_idx]
 
-    # Methods (multiple)
-    raw_methods = Prompt.ask(
-        f"  [{DIM}]Method(s) (comma-separated)[/]", default="lasso"
-    )
-    methods = [m.strip() for m in raw_methods.split(",") if m.strip()]
+        raw_methods = Prompt.ask(
+            f"  [{DIM}]Method(s) (comma-separated)[/]", default="lasso"
+        )
+        methods = [m.strip() for m in raw_methods.split(",") if m.strip()]
+    else:
+        sizes = [
+            s.strip() for s in str(preset.size).split(",")
+            if s.strip() in ("N10", "N50", "N100")
+        ] or ["N50"]
+        chosen_snr = _stored_filename_snr(1.0 if preset.snr is None else preset.snr)
+        chosen_topo = preset.topology
+        methods = [m.strip() for m in str(preset.method).split(",") if m.strip()]
 
     from sparselink import get_method
     from sparselink.bench.metrics import evaluate
@@ -2269,8 +2373,6 @@ def _infer_from_genespider() -> None:
 
 def _infer_from_synthetic() -> None:
     """Generate synthetic data (GeneSpider model) and run inference on it."""
-    from sparselink.bench.synthetic import generate_network
-
     console.print(f"\n  [{TEAL}]Synthetic data generator (GeneSpider model)[/]")
     n_genes = int(Prompt.ask(f"  [{DIM}]Number of genes[/]", default="20"))
     topology = Prompt.ask(
@@ -2279,29 +2381,25 @@ def _infer_from_synthetic() -> None:
         default="scalefree",
     )
     sparsity = float(Prompt.ask(f"  [{DIM}]Sparsity (edge density)[/]", default="0.1"))
-    snr = int(Prompt.ask(f"  [{DIM}]SNR[/]", default="1000"))
+    snr = float(Prompt.ask(f"  [{DIM}]SNR_L[/]", default="1"))
     seed = int(Prompt.ask(f"  [{DIM}]Seed[/]", default="42"))
 
-    rng = np.random.default_rng(seed)
-    A_true = generate_network(n_genes, topology=topology, sparsity=sparsity, seed=seed)
-    true_edges = int(np.count_nonzero(A_true))
+    from bench.generate import generate_replicates
 
-    # GeneSpider-style data: Y = (I-A)^{-1} @ (P + noise)
-    # P = identity (single-gene perturbation experiments)
-    n_samples = 3 * n_genes
-    G = np.linalg.inv(np.eye(n_genes) - A_true)
-    P = np.eye(n_genes, n_samples)
-    signal_var = np.var(G @ P)
-    noise_std = np.sqrt(signal_var / snr) if snr > 0 else 0.01
-    U = rng.normal(0, noise_std, (n_genes, n_samples))
-    Y = G @ (P + U)  # genes x samples
-    X = Y.T  # samples x genes (for sparselink)
-    P_input = P.T  # samples x genes (for sparselink)
+    drawn = generate_replicates(
+        n_genes=n_genes, topology=topology, sparsity=sparsity,
+        snr=snr, seed=seed, replicates=1,
+    )[0]
+    A_true = drawn["A"]
+    X = drawn["X"]
+    P_input = drawn["P"].T
+    n_samples = X.shape[0]
+    true_edges = int(np.count_nonzero(A_true) - np.count_nonzero(np.diag(A_true)))
 
     console.print(
         f"  [{GREEN}]✓[/] Generated {topology} network:"
         f" {n_genes} genes, {true_edges} edges,"
-        f" {n_samples} samples, SNR={snr}"
+        f" {n_samples} samples, SNR_L={drawn['snr_l']:.4g}"
     )
 
     method = Prompt.ask(f"  [{DIM}]Method[/]", default="lasso")
@@ -2354,13 +2452,158 @@ def _infer_from_synthetic() -> None:
         console.print(f"  [{DIM}]Adjacency saved to {out}[/]")
 
 
+def _indexed_output(path: str, index: int, total: int) -> Path:
+    """``net.npy`` stays put for one replicate and becomes ``net_r2.npy`` for more."""
+    target = Path(path)
+    if total == 1:
+        return target
+    return target.with_name(f"{target.stem}_r{index + 1}{target.suffix}")
+
+
+def _save_matrix(path: Path, values: np.ndarray, *, square_names: bool, columns: list[str] | None) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.suffix.lower() == ".csv":
+        import pandas as pd
+
+        frame = pd.DataFrame(values)
+        if square_names and columns is not None:
+            frame.index = columns
+            frame.columns = columns
+        elif columns is not None and values.shape[1] == len(columns):
+            frame.columns = columns
+        frame.to_csv(path, index=square_names)
+    else:
+        np.save(path, values)
+
+
+def _write_generated(
+    drawn: list[dict[str, Any]],
+    network_out: str | None,
+    data_out: str | None,
+    perturbation_out: str | None,
+) -> None:
+    """Write network, expression (samples × genes) and perturbation files."""
+    total = len(drawn)
+    for item in drawn:
+        index = int(item["replicate"]) - 1
+        names = [f"G{i}" for i in range(item["A"].shape[0])]
+        if network_out:
+            path = _indexed_output(network_out, index, total)
+            _save_matrix(path, item["A"], square_names=True, columns=names)
+            console.print(f"  [{GREEN}]✓[/] Network saved to {path}")
+        if data_out:
+            path = _indexed_output(data_out, index, total)
+            _save_matrix(path, item["X"], square_names=False, columns=names)
+            console.print(f"  [{GREEN}]✓[/] Expression saved to {path}")
+        if perturbation_out:
+            path = _indexed_output(perturbation_out, index, total)
+            _save_matrix(path, item["P"], square_names=False, columns=None)
+            console.print(f"  [{GREEN}]✓[/] Perturbation saved to {path}")
+
+
+def _print_generated(drawn: list[dict[str, Any]]) -> None:
+    for item in drawn:
+        network = item["A"]
+        n_genes = network.shape[0]
+        edges = int(np.count_nonzero(network) - np.count_nonzero(np.diag(network)))
+        console.print(
+            f"  [{GREEN}]✓[/] Replicate {item['replicate']}: {item['topology']}, "
+            f"{n_genes} genes, {edges} edges, {item['Y'].shape[1]} experiments, "
+            f"SNR_L={item['snr_l']:.4g} (seed {item['seed']})"
+        )
+
+
+def _report_inference(method: str, drawn: dict[str, Any]) -> np.ndarray:
+    """Fit ``method`` on one generated replicate and print scores against A."""
+    from sparselink import get_method
+    from sparselink.bench.metrics import evaluate
+
+    import sparselink.methods  # noqa: F401
+    from bench.genespider import ALPHA_SWEEP
+
+    network = drawn["A"]
+    expression = drawn["X"]
+    design = drawn["P"].T
+    n_genes = network.shape[0]
+    method_cls = get_method(method) if method != "zscore" else None
+    with console.status(f"[{TEAL}]Running {method}...[/]"):
+        if method == "zscore":
+            from methods.zscore import ZScore
+            from datastruct.Dataset import Dataset
+
+            dataset = Dataset()
+            dataset._Y = drawn["Y"]
+            dataset._P = drawn["P"]
+            adj, _ = ZScore(dataset)
+        elif method in ALPHA_SWEEP:
+            from sklearn.metrics import roc_auc_score
+
+            param = ALPHA_SWEEP[method]
+            alphas = np.logspace(-4, 1, 20)
+            mask = ~np.eye(n_genes, dtype=bool)
+            y_true = (network[mask] != 0).astype(int)
+            best_auroc, adj = -1.0, np.zeros_like(network)
+            for alpha in alphas:
+                result = method_cls(**{param: float(alpha)}).fit(expression, design)
+                try:
+                    score = float(roc_auc_score(y_true, np.abs(result.adjacency_matrix[mask])))
+                except ValueError:
+                    score = 0.5
+                if score > best_auroc:
+                    best_auroc, adj = score, result.adjacency_matrix
+        else:
+            result = method_cls().fit(expression, design)
+            adj = result.adjacency_matrix
+    n_edges = int(np.count_nonzero(adj) - np.count_nonzero(np.diag(adj)))
+    metrics = evaluate(network, adj)
+    console.print(f"\n  [{GREEN}]✓[/] {n_edges} edges inferred with {method}")
+    table = Table(title="vs True Network", title_style=TEAL, border_style="dim")
+    table.add_column("Metric", style="bold")
+    table.add_column("Value", justify="right")
+    for name, val in [
+        ("AUROC", metrics.auroc), ("AUPR", metrics.aupr),
+        ("F1", metrics.f1), ("MCC", metrics.mcc),
+    ]:
+        table.add_row(name, f"[{_color(val)}]{val:.3f}[/]")
+    console.print(table)
+    return np.asarray(adj)
+
+
+def _cmd_generate(args: argparse.Namespace) -> None:
+    """``pygs generate``: the non-interactive form of menu option 2."""
+    from bench.generate import generate_replicates
+
+    drawn = generate_replicates(
+        n_genes=args.n_genes,
+        topology=args.topology,
+        sparsity=args.sparsity,
+        snr=args.snr,
+        seed=args.seed,
+        replicates=args.replicates,
+        experiments_per_gene=args.experiments_per_gene,
+    )
+    _print_generated(drawn)
+    _write_generated(drawn, args.network_out, args.data_out, args.perturbation_out)
+    if args.method:
+        adjacency = _report_inference(args.method, drawn[0])
+        if args.output:
+            np.save(args.output, adjacency)
+            console.print(f"  [{DIM}]Adjacency saved to {args.output}[/]")
+
+
 def _synthetic_guide() -> None:
     """Interactive guide for generating synthetic data and networks."""
-    from sparselink.bench.synthetic import generate_network
-
     console.print(f"\n  [{TEAL}]━━━ Generate Synthetic Data & Networks ━━━[/]\n")
     console.print(f"  [{DIM}]Create benchmark datasets with known ground-truth networks.[/]")
-    console.print(f"  [{DIM}]Uses GeneSpider perturbation model: Y = (I-A)⁻¹(P + noise)[/]\n")
+    console.print(
+        f"  [{DIM}]GeneSPIDER model: Y = -A⁺P + E, with E scaled so SNR_L"
+        f" is the value you type. SNR_L 1 is the middle stored level"
+        f" (filename SNR1000), not 1000.[/]"
+    )
+    console.print(
+        f"  [{DIM}]A replicate is one new network and its expression matrix."
+        f" The same command is: pygs generate --replicates N[/]\n"
+    )
 
     n_genes = int(Prompt.ask(f"  [{TEAL}]Number of genes[/]", default="20"))
     topology = Prompt.ask(
@@ -2369,108 +2612,39 @@ def _synthetic_guide() -> None:
         default="scalefree",
     )
     sparsity = float(Prompt.ask(f"  [{TEAL}]Edge density (0-1)[/]", default="0.1"))
-    snr = int(Prompt.ask(f"  [{TEAL}]SNR (signal-to-noise ratio)[/]", default="1000"))
+    snr = float(Prompt.ask(f"  [{TEAL}]SNR_L[/]", default="1"))
+    replicates = int(Prompt.ask(
+        f"  [{TEAL}]Replicates (independent networks)[/]", default="1"
+    ))
     seed = int(Prompt.ask(f"  [{TEAL}]Random seed[/]", default="42"))
 
-    rng = np.random.default_rng(seed)
-    A_true = generate_network(n_genes, topology=topology, sparsity=sparsity, seed=seed)
+    from bench.generate import generate_replicates
 
-    # GeneSpider model: Y = (I-A)^{-1} @ (P + noise), P = identity perturbations
-    n_samples = 3 * n_genes
-    G = np.linalg.inv(np.eye(n_genes) - A_true)
-    P = np.eye(n_genes, n_samples)
-    signal_var = np.var(G @ P)
-    noise_std = np.sqrt(signal_var / snr) if snr > 0 else 0.01
-    U = rng.normal(0, noise_std, (n_genes, n_samples))
-    Y = G @ (P + U)
-    X = Y.T  # samples x genes
-    P_input = P.T  # samples x genes
+    drawn = generate_replicates(
+        n_genes=n_genes, topology=topology, sparsity=sparsity,
+        snr=snr, seed=seed, replicates=replicates,
+    )
+    _print_generated(drawn)
 
-    true_edges = int(np.count_nonzero(A_true))
-    density = true_edges / (n_genes * (n_genes - 1))
-    spectral = float(np.max(np.abs(np.linalg.eigvals(A_true))))
-
-    console.print(f"\n  [{GREEN}]✓ Network & data generated[/]")
-    console.print(f"    [{DIM}]Topology:[/]   {topology}")
-    console.print(f"    [{DIM}]Genes:[/]      {n_genes}")
-    console.print(f"    [{DIM}]Edges:[/]      {true_edges} (density={density:.3f})")
-    console.print(f"    [{DIM}]Spectral ρ:[/] {spectral:.3f}")
-    console.print(f"    [{DIM}]Samples:[/]    {n_samples}")
-    console.print(f"    [{DIM}]SNR:[/]        {snr}")
-
-    # Save options
     console.print(f"\n  [{TEAL}]Save outputs:[/]")
-    net_out = Prompt.ask(f"  [{DIM}]Network file (.npy, blank=skip)[/]", default="")
-    data_out = Prompt.ask(f"  [{DIM}]Data file (.npy/.csv, blank=skip)[/]", default="")
+    net_out = Prompt.ask(f"  [{DIM}]Network file (.npy/.csv, blank=skip)[/]", default="")
+    data_out = Prompt.ask(f"  [{DIM}]Expression file (.npy/.csv, blank=skip)[/]", default="")
+    pert_out = Prompt.ask(f"  [{DIM}]Perturbation file (.npy/.csv, blank=skip)[/]", default="")
+    _write_generated(drawn, net_out, data_out, pert_out)
 
-    if net_out:
-        if net_out.endswith(".csv"):
-            import pandas as pd
-            names = [f"G{i}" for i in range(n_genes)]
-            pd.DataFrame(A_true, index=names, columns=names).to_csv(net_out)
-        else:
-            np.save(net_out, A_true)
-        console.print(f"  [{GREEN}]✓[/] Network saved to {net_out}")
-
-    if data_out:
-        if data_out.endswith(".csv"):
-            import pandas as pd
-            names = [f"G{i}" for i in range(n_genes)]
-            pd.DataFrame(X, columns=names).to_csv(data_out, index=False)
-        else:
-            np.save(data_out, X)
-        console.print(f"  [{GREEN}]✓[/] Data saved to {data_out}")
-
-    # Offer to run inference immediately
     run_now = Prompt.ask(
-        f"\n  [{DIM}]Run inference on this data now?[/]",
+        f"\n  [{DIM}]Run inference on the first replicate now?[/]",
         choices=["y", "n"],
         default="y",
     )
     if run_now == "y":
-        from sparselink import get_method
-        import sparselink.methods  # noqa: F401
-        from sparselink.bench.metrics import evaluate
-        from bench.genespider import ALPHA_SWEEP
-
         method = Prompt.ask(f"  [{DIM}]Method[/]", default="lasso")
-        method_cls = get_method(method)
+        _report_inference(method, drawn[0])
 
-        with console.status(f"[{TEAL}]Running {method}...[/]"):
-            if method in ALPHA_SWEEP:
-                from sklearn.metrics import roc_auc_score
-                param = ALPHA_SWEEP[method]
-                alphas = np.logspace(-4, 1, 20)
-                mask = ~np.eye(n_genes, dtype=bool)
-                y_true = (A_true[mask] != 0).astype(int)
-                best_auroc, adj = -1.0, np.zeros_like(A_true)
-                for a in alphas:
-                    r = method_cls(**{param: float(a)}).fit(X, P_input)
-                    try:
-                        sc = float(roc_auc_score(y_true, np.abs(r.adjacency_matrix[mask])))
-                    except ValueError:
-                        sc = 0.5
-                    if sc > best_auroc:
-                        best_auroc, adj = sc, r.adjacency_matrix
-            else:
-                result = method_cls().fit(X, P_input)
-                adj = result.adjacency_matrix
-
-        n_edges = int(np.count_nonzero(adj) - np.count_nonzero(np.diag(adj)))
-        metrics = evaluate(A_true, adj)
-
-        console.print(f"\n  [{GREEN}]✓[/] {n_edges} edges inferred with {method}")
-        t = Table(title="vs True Network", title_style=TEAL, border_style="dim")
-        t.add_column("Metric", style="bold")
-        t.add_column("Value", justify="right")
-        for name, val in [
-            ("AUROC", metrics.auroc), ("AUPR", metrics.aupr),
-            ("F1", metrics.f1), ("MCC", metrics.mcc),
-        ]:
-            t.add_row(name, f"[{_color(val)}]{val:.3f}[/]")
-        console.print(t)
-
-    console.print(f"\n  [{DIM}]Tip: use 'pygs bench --tier fast' for full multi-method benchmarking[/]")
+    console.print(
+        f"\n  [{DIM}]Tip: pygs generate --replicates N --snr 1 writes the same data"
+        f" without the menu. pygs bench --tier fast benchmarks it.[/]"
+    )
 
 
 def _interactive() -> None:
@@ -2630,9 +2804,13 @@ def _drop_sklearn_warnings() -> None:
 
 def main() -> None:
     _drop_sklearn_warnings()
+    from bench.genespider import tier_listing
+
     parser = argparse.ArgumentParser(
         prog="pygs",
         description="pyGS — gene regulatory network inference & benchmarking",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=tier_listing(),
     )
     subs = parser.add_subparsers(dest="command")
 
@@ -2643,8 +2821,33 @@ def main() -> None:
     subs.add_parser("methods", help="List all inference methods")
 
     # infer
-    ip = subs.add_parser("infer", help="Infer a network from expression data")
-    ip.add_argument("file", help="Input data or URL (.h5ad, .csv, .tsv, .txt, .npy)")
+    ip = subs.add_parser(
+        "infer",
+        help="Infer a network from a file, saved GeneSPIDER data, or new synthetic data",
+    )
+    ip.add_argument(
+        "file", nargs="?", default=None,
+        help="Input data or URL (.h5ad, .csv, .tsv, .txt, .npy). Omit with --source",
+    )
+    ip.add_argument(
+        "--source", choices=["file", "stored", "synthetic"], default=None,
+        help="file (a path), stored (a saved GeneSPIDER dataset), or synthetic",
+    )
+    ip.add_argument("--size", default="N50", help="Stored data size: N10, N50 or N100")
+    ip.add_argument(
+        "--snr", type=float, default=None,
+        help="SNR_L. Stored files: 0.01, 1 or 100 (filenames SNR10, SNR1000, SNR100000)",
+    )
+    ip.add_argument(
+        "--topology", default="scalefree", choices=["random", "scalefree", "smallworld"],
+    )
+    ip.add_argument("--n-genes", type=int, default=20)
+    ip.add_argument("--sparsity", type=float, default=0.1)
+    ip.add_argument("--seed", type=int, default=42)
+    ip.add_argument(
+        "--replicates", type=int, default=1,
+        help="Synthetic only: independent datasets. Inference uses the first",
+    )
     ip.add_argument("-m", "--method", default="lasso", help="Inference method")
     ip.add_argument(
         "-o", "--output", default=None, help="Save adjacency as .npy"
@@ -2652,6 +2855,52 @@ def main() -> None:
     ip.add_argument(
         "--directed", action="store_true", help="Infer edge direction from perturbation asymmetry"
     )
+
+    generate_help = (
+        "Write one or more GeneSPIDER-style networks and expression matrices.\n"
+        "A replicate is one independent network plus the expression simulated from\n"
+        "it, at the same size, topology, sparsity and SNR_L. Seeds are seed, seed+1,\n"
+        "... . With --replicates greater than 1, files are numbered net_r1.npy,\n"
+        "net_r2.npy, and so on. Inside each replicate every gene is knocked down\n"
+        "--experiments-per-gene times (default 3).\n"
+        "\n"
+        "SNR_L is the GeneSPIDER noise level. The value 1 is the middle stored\n"
+        "level; those files are named SNR1000 because the filename is SNR_L times\n"
+        "1000. Do not pass 1000 unless you want SNR_L 1000.\n"
+        "\n"
+        "  uv run pygs generate --n-genes 20 --topology scalefree --sparsity 0.1 \\\n"
+        "      --snr 1 --replicates 5 --network-out net.npy --data-out expr.npy \\\n"
+        "      --perturbation-out design.npy"
+    )
+    gen = subs.add_parser(
+        "generate",
+        help="Generate synthetic networks and expression (menu option 2)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=generate_help,
+    )
+    gen.add_argument("--n-genes", type=int, default=20)
+    gen.add_argument(
+        "--topology", default="scalefree", choices=["random", "scalefree", "smallworld"],
+    )
+    gen.add_argument("--sparsity", type=float, default=0.1, help="Edge density of the true network")
+    gen.add_argument(
+        "--snr", type=float, default=1.0,
+        help="SNR_L to hit. 1 is the middle stored level (filename SNR1000), not 1000",
+    )
+    gen.add_argument(
+        "--replicates", type=int, default=1,
+        help="How many independent networks and expression matrices to write",
+    )
+    gen.add_argument(
+        "--experiments-per-gene", type=int, default=3,
+        help="Knockdown replicates of each gene inside every dataset",
+    )
+    gen.add_argument("--seed", type=int, default=42)
+    gen.add_argument("--network-out", default=None, help="True network .npy or .csv")
+    gen.add_argument("--data-out", default=None, help="Expression .npy or .csv (samples × genes)")
+    gen.add_argument("--perturbation-out", default=None, help="Perturbation design .npy or .csv (genes × experiments)")
+    gen.add_argument("-m", "--method", default=None, help="Also infer with this method on the first replicate")
+    gen.add_argument("-o", "--output", default=None, help="Adjacency .npy when --method is set")
 
     # bench (stored GeneSPIDER, generated GeneSPIDER-style, or sparselink synthetic data)
     bench_epilog = (
@@ -2706,7 +2955,10 @@ def main() -> None:
             "--tier", default=None,
             help="Comma-separated: fast,medium,slow,very_slow,nestboot (default fast)",
         )
-        parser.add_argument("--methods", default=None, help="Comma-separated methods; overrides --tier")
+        parser.add_argument(
+            "--methods", default=None,
+            help="Comma-separated methods for this run, for example lasso,lsco. Overrides --tier",
+        )
         parser.add_argument(
             "--snr", default=None,
             help="Comma-separated SNR_L values: levels to generate, or stored levels to keep",
@@ -2749,6 +3001,10 @@ def main() -> None:
             help="Experiments per dataset. Default 3 per gene for generated, 200 for sparselink",
         )
         generated.add_argument(
+            "--noise", default=None,
+            help="Comma-separated noise std for --data sparselink (default 0.01,0.1,1). Not SNR_L",
+        )
+        generated.add_argument(
             "--timeout", type=int, default=60, help="Seconds per method (sparselink only)"
         )
         parser.add_argument("--seed", type=int, default=42)
@@ -2757,6 +3013,9 @@ def main() -> None:
             help="Score table (.json), or the figure (.png, .pdf, .svg) with the tables beside it",
         )
 
+    from bench.genespider import tier_listing
+
+    bench_epilog = bench_epilog + "\n\n" + tier_listing()
     bp = subs.add_parser(
         "bench",
         help="Benchmark against true networks: stored GeneSPIDER, generated, or sparselink data",
@@ -2767,9 +3026,10 @@ def main() -> None:
 
     gp = subs.add_parser(
         "bench-gs",
-        help="Same as bench --data stored (kept for older commands)",
+        help="Benchmark on saved GeneSPIDER data (same as bench --data stored)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Same as `pygs bench --data stored`; see `pygs bench --help`.",
+        epilog="Saved GeneSPIDER files, not a new experiment. Same as `pygs bench --data stored`.\n\n"
+        + tier_listing(),
     )
     _bench_arguments(gp)
     gp.set_defaults(data_alias="stored")
@@ -2955,6 +3215,8 @@ def main() -> None:
         _cmd_methods(args)
     elif args.command == "infer":
         _cmd_infer(args)
+    elif args.command == "generate":
+        _cmd_generate(args)
     elif args.command in ("bench", "bench-gs"):
         _cmd_bench(args)
     elif args.command == "nestboot":

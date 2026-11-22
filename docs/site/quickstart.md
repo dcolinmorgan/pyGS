@@ -93,7 +93,7 @@ pygs show results.json
 
 ## 3. Benchmark on GeneSpider data
 
-GeneSpider provides real perturbation-response datasets at controlled SNR levels
+GeneSpider provides saved perturbation-response datasets at controlled SNR levels
 from the [Sonnhammer lab](https://bitbucket.org/sonnhammergrni/).
 pyGS downloads and caches them automatically.
 
