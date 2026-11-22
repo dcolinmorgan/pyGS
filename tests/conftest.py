@@ -5,15 +5,16 @@ This file adds the 'src' directory to sys.path so that the package can be import
 as if it were installed and provides common fixtures for testing.
 """
 
+import logging
 import os
 import sys
-import pytest
-import numpy as np
-import pandas as pd
+import tempfile
 from pathlib import Path
 from unittest.mock import Mock
-import tempfile
-import logging
+
+import numpy as np
+import pandas as pd
+import pytest
 
 # Add the src directory to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
@@ -64,4 +65,4 @@ def sample_gene_expression_data():
 def temp_output_dir():
     """Fixture providing a temporary output directory."""
     with tempfile.TemporaryDirectory() as temp_dir:
-        yield Path(temp_dir) 
+        yield Path(temp_dir)

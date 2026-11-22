@@ -24,7 +24,7 @@ from datastruct.Dataset import Dataset
 
 def _load_bundled_motif_prior() -> tuple[set[str], dict[tuple[str, str], float]] | None:
     """Load bundled motif prior (TF-target edges from JASPAR/CIS-BP).
-    
+
     Returns
     -------
     tuple of (tf_set, motif_edges) or None if file not found
@@ -35,10 +35,10 @@ def _load_bundled_motif_prior() -> tuple[set[str], dict[tuple[str, str], float]]
     motif_path = Path(__file__).parent / "data" / "scenic_motif_prior.txt.gz"
     if not motif_path.exists():
         return None
-    
+
     tf_set: set[str] = set()
     motif_edges: dict[tuple[str, str], float] = {}
-    
+
     with gzip.open(motif_path, "rt") as f:
         next(f)  # skip header
         for line in f:
@@ -47,7 +47,7 @@ def _load_bundled_motif_prior() -> tuple[set[str], dict[tuple[str, str], float]]
                 tf, target, weight = parts[0], parts[1], float(parts[2])
                 tf_set.add(tf)
                 motif_edges[(tf, target)] = weight
-    
+
     return tf_set, motif_edges
 
 
@@ -501,20 +501,20 @@ def _run_scenicplus_direct(
     **kwargs: Any,
 ) -> Any:
     """SCENIC+-inspired GRN inference with bundled motif prior.
-    
+
     Uses a bundled motif prior (652 TFs, ~40K TF-target edges from JASPAR/CIS-BP)
     for TF detection and edge weighting, bringing it closer to true SCENIC+.
-    
+
     TF detection priority:
     1. cisTopic object (if provided) - from user's ATAC-seq analysis
     2. Bundled motif prior (default)
     3. Heuristic pattern matching (fallback)
-    
+
     Edge weighting:
     1. GBM-inferred importance scores (base)
     2. Motif prior weights (multiplicative boost for edges with TF motif support)
     3. Enhancer-gene links from cisTopic (boost targets with ATAC-seq enhancer support)
-    
+
     To reproduce SCENIC+ more closely, users can:
     1. Run pycisTopic on their ATAC-seq data to build a cisTopic object
     2. Pass that object via cisTopic_obj_fname parameter
@@ -569,7 +569,7 @@ def _run_scenicplus_direct(
         motif_tfs, motif_edges = motif_data
     else:
         motif_tfs, motif_edges = set(), {}
-    
+
     # Load cisTopic object for TF list and enhancer-gene links
     enhancer_gene_links: dict[tuple[str, str], float] = {}
     if cisTopic_obj_fname and os.path.exists(cisTopic_obj_fname):
@@ -578,7 +578,7 @@ def _run_scenicplus_direct(
                 cistopic_obj = pickle.load(f)
             # Extract TF list from cisTopic if available
             tf_list = getattr(cistopic_obj, "tf_names", None)
-            
+
             # Extract enhancer-gene links (region_to_gene) if available
             # These come from ATAC-seq peak-to-gene correlation in SCENIC+
             region_to_gene = getattr(cistopic_obj, "region_to_gene", None)
@@ -648,7 +648,7 @@ def _run_scenicplus_direct(
                 if (tf_name, target_name) in motif_edges:
                     # Boost edges with motif support (multiplicative)
                     adj_matrix[i, j] *= (1.0 + motif_edges[(tf_name, target_name)])
-    
+
     # Apply enhancer-gene link weighting from cisTopic ATAC-seq
     if enhancer_gene_links:
         for j, target_name in enumerate(var_names):

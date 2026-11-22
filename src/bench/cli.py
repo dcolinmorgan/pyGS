@@ -40,7 +40,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import sys
 import time
 import warnings
 from dataclasses import asdict
@@ -48,7 +47,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from rich import box
 from rich.console import Console
 from rich.progress import (
@@ -345,9 +343,8 @@ def _cmd_status(args: argparse.Namespace) -> None:
     # sparselink status
     tree = Tree(f"[{TEAL}]sparselink[/]", guide_style="dim")
     try:
-        from sparselink import list_methods
-
         import sparselink.methods  # noqa: F401
+        from sparselink import list_methods
 
         methods = list_methods()
         mb = tree.add(f"Methods ({len(methods)})")
@@ -383,7 +380,7 @@ def _cmd_status(args: argparse.Namespace) -> None:
         pygs_tree.add(f"[{GREEN}]✓[/] GeneSpider cache: {n} files")
     else:
         pygs_tree.add(
-            f"[dim]○[/] No GeneSpider cache (auto-downloaded on first run)"
+            "[dim]○[/] No GeneSpider cache (auto-downloaded on first run)"
         )
 
     mods = pygs_tree.add("pyGS modules")
@@ -409,9 +406,8 @@ def _cmd_status(args: argparse.Namespace) -> None:
 
 def _cmd_methods(args: argparse.Namespace) -> None:
     """List all registered inference methods."""
-    from sparselink import list_methods
-
     import sparselink.methods  # noqa: F401
+    from sparselink import list_methods
 
     t = Table(title="Available Methods", title_style=TEAL, border_style="dim")
     t.add_column("Name", style="bold")
@@ -428,9 +424,9 @@ def _cmd_methods(args: argparse.Namespace) -> None:
 def _cmd_infer(args: argparse.Namespace) -> None:
     """Infer a network from a data file using a sparselink method."""
     warnings.simplefilter("ignore")
+    import sparselink.methods  # noqa: F401
     from sparselink import get_method
 
-    import sparselink.methods  # noqa: F401
     from bio.io import PERTURBATION_METHODS, load_inference_inputs
 
     path = Path(args.file)
@@ -545,10 +541,10 @@ def _pick_benchmark_methods() -> dict[str, Any]:
 
 def _resolve_methods(tier: str, extra_methods: list[str]) -> list[str]:
     """Tier members plus named methods, registered ones only, without repeats."""
-    from bench.genespider import PYGS_METHODS, TIERS
+    import sparselink.methods  # noqa: F401
     from sparselink import list_methods
 
-    import sparselink.methods  # noqa: F401
+    from bench.genespider import PYGS_METHODS, TIERS
 
     names: list[str] = []
     for name in (t.strip() for t in tier.split(",")):
@@ -670,6 +666,7 @@ def _scores_along_sparsity(method_name: str, X: np.ndarray, P: np.ndarray | None
             stack, used = TIGRESS(dataset)
         else:
             from sparselink import get_method
+
             from bench.genespider import ALPHA_SWEEP
             method_cls = get_method(method_name)
             param = ALPHA_SWEEP.get(method_name)
@@ -895,10 +892,9 @@ def _run_benchmark_live(args: argparse.Namespace) -> None:
         return
     warnings.simplefilter("ignore")
 
+    import sparselink.methods  # noqa: F401
     from sparselink.bench.run_benchmark import run_single
     from sparselink.bench.synthetic import generate_data, generate_network
-
-    import sparselink.methods  # noqa: F401
 
     from bench.genespider import NESTBOOT_EXCLUDED, PYGS_METHODS
 
@@ -1102,12 +1098,11 @@ def _run_direct_fair(
     the absolute adjacency matrices (bagging over alphas, single data).
     For methods without alpha: single run with defaults.
     """
+    import sparselink.methods  # noqa: F401
     from sparselink import get_method
     from sparselink.bench.metrics import evaluate
 
     from bench.genespider import ALPHA_SWEEP, PYGS_METHODS, _fit_pygs_method
-
-    import sparselink.methods  # noqa: F401
 
     n = X.shape[1]
 
@@ -1181,10 +1176,10 @@ def _run_nestboot_on_gs(
     from sparselink import get_method
     from sparselink.bench.metrics import evaluate
 
+    from analyze.Data import Data
     from config import AnalysisConfig
     from datastruct.Dataset import Dataset
     from datastruct.Network import Network
-    from analyze.Data import Data
     from methods.nestboot import Nestboot
 
     n_genes = X.shape[1]
@@ -1529,9 +1524,8 @@ def _cmd_nestboot(args: argparse.Namespace) -> None:
         console.print(f"  [{ROSE}]Edge and node tables need --zeta, e.g. --zeta=-4:0:41[/]")
         raise SystemExit(2)
 
-    from sparselink import get_method
-
     import sparselink.methods  # noqa: F401
+    from sparselink import get_method
 
     from bio.io import PERTURBATION_METHODS, load_inference_inputs
     from config import AnalysisConfig
@@ -1842,6 +1836,7 @@ def _cmd_plot_nestboot(args: argparse.Namespace) -> None:
         return
     try:
         import os
+
         import graphistry
     except ImportError:
         console.print(f"  [{ROSE}]graphistry is not installed. Tables were written.[/]")
@@ -2127,9 +2122,9 @@ def _infer_from_genespider() -> None:
     )
     methods = [m.strip() for m in raw_methods.split(",") if m.strip()]
 
+    import sparselink.methods  # noqa: F401
     from sparselink import get_method
     from sparselink.bench.metrics import evaluate
-    import sparselink.methods  # noqa: F401
 
     # Results table
     results_table = Table(
@@ -2307,9 +2302,10 @@ def _infer_from_synthetic() -> None:
     method = Prompt.ask(f"  [{DIM}]Method[/]", default="lasso")
     out = Prompt.ask(f"  [{DIM}]Output (.npy)[/]", default="")
 
+    import sparselink.methods  # noqa: F401
     from sparselink import get_method
     from sparselink.bench.metrics import evaluate
-    import sparselink.methods  # noqa: F401
+
     from bench.genespider import ALPHA_SWEEP
 
     method_cls = get_method(method)
@@ -2428,9 +2424,10 @@ def _synthetic_guide() -> None:
         default="y",
     )
     if run_now == "y":
-        from sparselink import get_method
         import sparselink.methods  # noqa: F401
+        from sparselink import get_method
         from sparselink.bench.metrics import evaluate
+
         from bench.genespider import ALPHA_SWEEP
 
         method = Prompt.ask(f"  [{DIM}]Method[/]", default="lasso")

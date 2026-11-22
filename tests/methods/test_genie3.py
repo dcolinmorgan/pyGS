@@ -1,8 +1,11 @@
-import pytest
+from unittest.mock import MagicMock
+
 import numpy as np
-from unittest.mock import MagicMock, patch
-from src.methods.genie3 import GENIE3
+import pytest
+
 from src.datastruct.Dataset import Dataset
+from src.methods.genie3 import GENIE3
+
 
 class TestGENIE3:
     @pytest.fixture
@@ -18,15 +21,15 @@ class TestGENIE3:
 
     def test_genie3_basic(self, synthetic_data):
         dataset, Y = synthetic_data
-        
+
         # Run GENIE3
         Afit, thresholds = GENIE3(dataset, n_estimators=10, random_state=42)
-        
+
         # Check output shapes
         n_genes = Y.shape[0]
         assert Afit.shape == (n_genes, n_genes, 30) # Default 30 thresholds
         assert len(thresholds) == 30
-        
+
         # Check values
         assert np.all(Afit >= 0)
         # Importance scores are not strictly bounded to 1, but should be non-negative
@@ -34,11 +37,11 @@ class TestGENIE3:
     def test_genie3_custom_thresholds(self, synthetic_data):
         dataset, Y = synthetic_data
         thresholds = np.linspace(0, 0.1, 5)
-        
+
         # Note: GENIE3 scales the thresholds based on importance values
         # So we check if the number of thresholds matches
         Afit, out_thresholds = GENIE3(dataset, threshold_range=thresholds, n_estimators=10)
-        
+
         assert Afit.shape[2] == 5
         assert len(out_thresholds) == 5
 
@@ -46,7 +49,7 @@ class TestGENIE3:
         # Test with invalid input
         with pytest.raises(ValueError): # Or whatever error is raised when accessing attributes on None
             GENIE3(None)
-            
+
         dataset = MagicMock()
         dataset.Y = None
         dataset.data = None
@@ -60,8 +63,8 @@ class TestGENIE3:
         # Test with too few samples
         dataset = MagicMock(spec=Dataset)
         dataset.Y = np.random.rand(5, 2) # Only 2 samples
-        
+
         Afit, _ = GENIE3(dataset, n_estimators=10)
-        
+
         # Should return zeros if skipped
         assert np.all(Afit == 0)

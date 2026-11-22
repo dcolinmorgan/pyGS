@@ -1,12 +1,14 @@
 import sys
+
 sys.path.append("src")  # Add src/ to path
 import numpy as np
-from datastruct.Network import Network
-from datastruct.Experiment import Experiment
-from datastruct.Dataset import Dataset
-from analyze.Model import Model
-from analyze.Data import Data
+
 from analyze.CompareModels import CompareModels
+from analyze.Data import Data
+from analyze.Model import Model
+from datastruct.Dataset import Dataset
+from datastruct.Experiment import Experiment
+from datastruct.Network import Network
 
 
 def test_basic_functionality():

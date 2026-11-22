@@ -4,10 +4,10 @@ from typing import Any
 
 import numpy as np
 from sklearn.metrics import mutual_info_score
+from sparselink import get_method
 
 from analyze.Data import Data
 from datastruct.Dataset import Dataset
-from sparselink import get_method
 
 
 def mutual_information_matrix(data: np.ndarray) -> np.ndarray:

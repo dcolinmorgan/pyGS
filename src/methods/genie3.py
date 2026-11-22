@@ -3,10 +3,10 @@
 from typing import Any
 
 import numpy as np
+from sparselink import get_method
 
 from analyze.Data import Data
 from datastruct.Dataset import Dataset
-from sparselink import get_method
 
 
 def GENIE3(

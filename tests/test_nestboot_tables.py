@@ -1,7 +1,6 @@
 """NestBoot array to edge and node tables."""
 
 import numpy as np
-import pandas as pd
 
 from bio.nestboot_tables import nestboot_tables
 

@@ -4,10 +4,10 @@ from typing import Any
 
 import numpy as np
 from sklearn.linear_model import Lars, LassoLarsIC
+from sparselink import get_method
 
 from analyze.Data import Data
 from datastruct.Dataset import Dataset
-from sparselink import get_method
 
 
 def tigress_single_gene(

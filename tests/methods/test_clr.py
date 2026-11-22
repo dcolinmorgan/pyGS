@@ -1,8 +1,11 @@
-import pytest
-import numpy as np
 from unittest.mock import MagicMock
-from src.methods.clr import CLR, mutual_information_matrix, clr_transform
+
+import numpy as np
+import pytest
+
 from src.datastruct.Dataset import Dataset
+from src.methods.clr import CLR, clr_transform, mutual_information_matrix
+
 
 class TestCLR:
     @pytest.fixture
@@ -16,9 +19,9 @@ class TestCLR:
 
     def test_clr_basic(self, synthetic_data):
         dataset, Y = synthetic_data
-        
+
         Afit, thresholds = CLR(dataset)
-        
+
         n_genes = Y.shape[0]
         assert Afit.shape == (n_genes, n_genes, 30)
         assert len(thresholds) == 30
@@ -27,7 +30,7 @@ class TestCLR:
     def test_mi_calculation(self, synthetic_data):
         _, Y = synthetic_data
         mi = mutual_information_matrix(Y)
-        
+
         assert mi.shape == (5, 5)
         assert np.allclose(mi, mi.T) # Symmetric
         assert np.all(np.diag(mi) == 0) # Diagonal zeroed
@@ -38,9 +41,9 @@ class TestCLR:
             [1, 0, 0.2],
             [0.5, 0.2, 0]
         ])
-        
+
         clr = clr_transform(mi)
-        
+
         assert clr.shape == (3, 3)
         assert np.all(np.diag(clr) == 0)
         assert np.all(clr >= 0)

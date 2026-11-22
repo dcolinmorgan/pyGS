@@ -92,6 +92,8 @@ ignore = ["E501"]
 "src/bootstrap/compute_density.py" = ["F821"]
 "src/bootstrap/generate_plots.py" = ["F821"]
 "src/bootstrap/nb_fdr_analysis.py" = ["F821"]
+# scanpy is stubbed before these imports so the wrapper can load without it.
+"tests/test_scenicplus_wrapper.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["methods", "datastruct", "analyze", "bootstrap", "bio"]

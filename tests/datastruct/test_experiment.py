@@ -1,7 +1,8 @@
-import pytest
 import numpy as np
+
 from datastruct.Experiment import Experiment
 from datastruct.Network import Network
+
 
 def test_experiment_init():
     exp = Experiment()

@@ -1,7 +1,8 @@
-import pytest
 import numpy as np
-from datastruct.scalefree import scalefree
+
 from datastruct.random import randomNet
+from datastruct.scalefree import scalefree
+
 
 def test_scalefree():
     N = 20

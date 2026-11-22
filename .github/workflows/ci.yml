@@ -4,37 +4,47 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+  schedule:
+    # Full method set, including tiers marked slow. Pull requests run the fast set.
+    - cron: "0 6 * * 1"
 
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.12"
-      - run: pip install ruff
-      - name: Lint pyGS
-        run: ruff check src/ tests/
-      - name: Lint sparselink
-        run: ruff check sparselink/src/ sparselink/tests/
+          enable-cache: true
+      - name: Install
+        run: uv sync --frozen --extra dev
+      - name: Lint
+        run: uv run ruff check src/ tests/
 
   test:
     runs-on: ubuntu-latest
     strategy:
+      # The project requires Python >= 3.12 (pyproject.toml and uv.lock), so
+      # the previous 3.10 and 3.11 jobs cannot install. The matrix stays so a
+      # newer supported version can be added without restructuring the job.
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.12"]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install sparselink
-        run: pip install -e "./sparselink[test]"
-      - name: Install pyGS
-        run: pip install -e ".[test]"
-      - name: Run sparselink tests
-        run: pytest sparselink/tests/ --cov=sparselink --cov-report=xml:sparselink-coverage.xml -q
-      - name: Run pyGS tests
-        run: pytest tests/ --cov=src --cov-report=xml:pygs-coverage.xml -q
+          enable-cache: true
+      - name: Install
+        run: |
+          extras=(--extra test)
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            extras+=(--extra causal)
+          fi
+          uv sync --frozen "${extras[@]}"
+      - name: Fast tests
+        if: github.event_name == 'pull_request'
+        run: uv run pytest tests/ -m "not slow and not web" -q --durations=30
+      - name: Full tests
+        if: github.event_name != 'pull_request'
+        run: uv run pytest tests/ -q --durations=40

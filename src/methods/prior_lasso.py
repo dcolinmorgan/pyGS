@@ -1,6 +1,8 @@
 """Prior-guided LASSO — uses prior network to reduce penalty on known edges."""
 from __future__ import annotations
+
 from typing import Any
+
 import numpy as np
 from sklearn.linear_model import Lasso
 from sparselink.base import InferenceMethod
