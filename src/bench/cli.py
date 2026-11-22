@@ -2515,11 +2515,13 @@ def _print_generated(drawn: list[dict[str, Any]]) -> None:
 
 def _report_inference(method: str, drawn: dict[str, Any]) -> np.ndarray:
     """Fit ``method`` on one generated replicate and print scores against A."""
+    import sparselink.methods  # noqa: F401
     from sparselink import get_method
     from sparselink.bench.metrics import evaluate
 
-    import sparselink.methods  # noqa: F401
     from bench.genespider import ALPHA_SWEEP
+    from datastruct.Dataset import Dataset
+    from methods.zscore import ZScore
 
     network = drawn["A"]
     expression = drawn["X"]
@@ -2528,9 +2530,6 @@ def _report_inference(method: str, drawn: dict[str, Any]) -> np.ndarray:
     method_cls = get_method(method) if method != "zscore" else None
     with console.status(f"[{TEAL}]Running {method}...[/]"):
         if method == "zscore":
-            from methods.zscore import ZScore
-            from datastruct.Dataset import Dataset
-
             dataset = Dataset()
             dataset._Y = drawn["Y"]
             dataset._P = drawn["P"]
