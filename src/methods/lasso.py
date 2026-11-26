@@ -3,7 +3,38 @@
 import numpy as np
 
 from datastruct.Dataset import Dataset
+from bio.io import design_targets
 from sparselink import get_method
+
+
+def penalty_path(
+    X: np.ndarray,
+    targets: np.ndarray,
+    alphas: np.ndarray,
+    l1_ratio: float = 1.0,
+) -> np.ndarray:
+    """LASSO (``l1_ratio=1``) or elastic net at every penalty, as a stack of networks.
+
+    Row i of slice k solves ``X @ A[i] ≈ targets[:, i]`` at penalty ``alphas[k]``,
+    the same fit as sparselink's ``fit(X, targets)``. Each target's path is fitted
+    from the largest penalty down, starting from the previous solution.
+    """
+    from sklearn.linear_model import enet_path
+
+    X = np.asarray(X, dtype=float)
+    targets = np.asarray(targets, dtype=float)
+    alphas = np.asarray(alphas, dtype=float)
+    order = np.argsort(alphas)[::-1]
+    gram = X.T @ X
+    stack = np.zeros((targets.shape[1], X.shape[1], len(alphas)))
+    for i in range(targets.shape[1]):
+        y = targets[:, i]
+        _, coefs, _ = enet_path(
+            X, y, l1_ratio=l1_ratio, alphas=alphas[order],
+            precompute=gram, Xy=X.T @ y, max_iter=10000, tol=1e-4,
+        )
+        stack[i][:, order] = coefs
+    return stack
 
 
 def Lasso(
@@ -55,10 +86,11 @@ def Lasso(
 
     Afit = np.zeros((n_genes, n_genes, len(alpha_range)))
     method_cls = get_method("lasso")
+    targets = design_targets("lasso", P.T)
 
     for j, alpha in enumerate(alpha_range):
         method = method_cls(alpha=alpha)
-        result = method.fit(X, P.T)
+        result = method.fit(X, targets)
         Afit[:, :, j] = result.adjacency_matrix
 
     return Afit, alpha_range

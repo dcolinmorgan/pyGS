@@ -1,6 +1,7 @@
 import logging
+import multiprocessing
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Union
@@ -9,6 +10,14 @@ import numpy as np
 import pandas as pd
 
 from bootstrap.utils import NetworkUtils
+
+# The bootstrap fit a forked worker runs. Set in the parent before the fork, so
+# closures over the data reach the workers without pickling.
+_FORK_FIT = None
+
+
+def _forked_fit(task: tuple[int, int, int]) -> tuple[np.ndarray, np.ndarray]:
+    return _FORK_FIT(task)
 
 try:
     from config import AnalysisConfig
@@ -914,6 +923,7 @@ class Nestboot:
         method_kwargs: dict[str, Any] | None = None,
         method_params: dict[str, Any] | None = None,
         keep_design: bool = False,
+        processes: int = 0,
     ) -> NetworkResults:
         """Run NestBoot (Morgan et al. 2019) as in GeneSPIDER's Methods.NestBoot.
 
@@ -947,6 +957,8 @@ class Nestboot:
             method_kwargs: Additional arguments for callable inference_method
             method_params: Parameters to pass to inference method class (e.g., {'alpha_range': zetavec})
             keep_design: Bootstrap within replicate groups of P
+            processes: Fit bootstraps in this many forked processes instead of
+                threads, for methods that hold the GIL. 0 uses threads
 
         Returns:
             NetworkResults object
@@ -1062,7 +1074,7 @@ class Nestboot:
             present = np.abs(arr) > 1e-6
             diag = np.arange(arr.shape[0])
             present[diag, diag, :] = False
-            return present, arr
+            return present, (arr > 0) & present
 
         # side 0 is measured, side 1 shuffled.
         tasks = [
@@ -1104,12 +1116,12 @@ class Nestboot:
             r, side, _ = task
             counts = in_flight.setdefault(r, np.zeros((2,) + shape, dtype=count_dtype))
             if result is not None:
-                present, arr = result
+                present, pos = result
                 if present.shape != shape:
                     raise ValueError(f"Inference shape {present.shape} != {shape}")
                 counts[side] += present
                 if side == 0:
-                    np.add(positive, (arr > 0) & present, out=positive)
+                    np.add(positive, pos, out=positive)
             fits_done[r] += 1
             if fits_done[r] == 2 * n_inner:
                 _finish(r)
@@ -1120,9 +1132,19 @@ class Nestboot:
         failures = 0
         step = max(1, total_fits // 20)
         print(f"  NestBoot {done}/{total_fits}", flush=True)
-        n_workers = min(os.cpu_count() or 1, total_fits)
-        with ThreadPoolExecutor(max_workers=n_workers) as pool:
-            futures = {pool.submit(_fit, t): t for t in tasks[1:]}
+        if processes:
+            global _FORK_FIT
+            _FORK_FIT = _fit
+            pool = ProcessPoolExecutor(
+                max_workers=min(processes, total_fits),
+                mp_context=multiprocessing.get_context("fork"),
+            )
+            fit = _forked_fit
+        else:
+            pool = ThreadPoolExecutor(max_workers=min(os.cpu_count() or 1, total_fits))
+            fit = _fit
+        with pool:
+            futures = {pool.submit(fit, t): t for t in tasks[1:]}
             for fut in as_completed(list(futures)):
                 # Drop the finished future so its matrices can be freed.
                 task = futures.pop(fut)

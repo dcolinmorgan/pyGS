@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `pygs nestboot --no-design` fits LASSO, ridge and elastic net to expression alone, as pyGS did before, for comparison. `--zeta-cutoff` runs LASSO and elastic net like LSCO: one fit at `--alpha`, then `|coefficient| <= zeta` on Y rescaled to [-1, 1]. Single-penalty LASSO and elastic net fits reuse X'X, about 9× faster than sparselink's fit on K562
+- `pygs nestboot --processes N` fits bootstraps in N forked processes instead of threads. LASSO and elastic net hold the GIL for most of a fit, so threads give them about 3× on 48 cores. On K562, 48 processes run 100 × 100 LASSO over `--zeta=-3:-1:21` in about an hour
 - `pygs` CLI with interactive mode and subcommands (`status`, `methods`, `infer`, `bench`, `bench-gs`, `nestboot`, `evaluate`, `plot`, `show`, `dashboard`)
 - GeneSpider live benchmark runner with Rich progress bars in the `pygs` CLI
 - NestBoot tier option in the interactive `bench-gs` wizard — select "nestboot" alongside method tiers to configure outer/inner runs and FDR threshold inline
@@ -18,11 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pygs plot <run>.npy --zeta Z --top-genes N --top-links M` keeps the N genes with the most FDR-controlled links and the M highest-support links among them, in place of the `--per-gene` cut, for a network of a chosen size
 - `pygs plot <run>.npy --zeta Z --min-support S` keeps only links with support of at least S in every outer run, a stricter cutoff than the run's, and prints the estimated FDR at S (shuffled over measured links at or above it, NestBoot's rule at its own cutoff). `nestboot_tables` returns it as `info["fdr"]`
 - `nestboot_report/scenic_support.py` scores stacked SCENIC+ bootstrap runs against their gene-shuffled null with NestBoot's support, cutoff and outer-run overlap, and writes the files `plot_support.py` draws. The NestBoot cutoff takes an optional `mask`, so it can score an edge list
-- `nestboot_report/plot_support.py --zeta Z` draws one sparsity with larger type, the legend above the panel and a full-range inset placed clear of the curves; `--no-inset` leaves the inset out. At a sparsity that misses 5% FDR it still marks the run's cutoff, labelled with the FDR reached there, and `--min-support S` also marks a stricter cutoff with its estimated FDR
+- `nestboot_report/plot_support.py --zeta Z` draws one sparsity with larger type, the legend above the panel and a full-range inset placed clear of the curves; `--no-inset` leaves the inset out. At a sparsity that misses 5% FDR it still marks the run's cutoff, labelled with the FDR reached there, and `--min-support S` also marks a stricter cutoff with its estimated FDR. Without `--zeta`, `--full-range` gives every panel the frequency range 0–1 so the panels share one scale. `--xmin 0.8` zooms the support axis into the tail and rescales frequency to what is shown; the inset keeps the full range and its grey box marks the zoomed support and frequency
 
 ### Fixed
 - `pygs` no longer prints sklearn's "`sklearn.utils.parallel.delayed` should be used with `sklearn.utils.parallel.Parallel`" warning once per tree when NestBoot fits genie3 in many threads. On Python < 3.14 each sklearn task clears the process-wide warning filters, so the CLI's ignore filter could not hold; the message is now dropped when printed
 - The same race let sklearn's `ConvergenceWarning` ("Objective did not converge") through once per LASSO or elastic net bootstrap fit at small regularisation values; it is dropped when printed too
+- Ridge, LASSO, elastic net and prior LASSO now fit the knockdown design as GeneSPIDER does, A Y = −P, like LSCO, everywhere pyGS calls them (`pygs infer`, `pygs nestboot`, `pygs bench` and the interactive menus). `pygs infer` and `pygs nestboot` used to fit them to expression alone, which gives a symmetric co-expression matrix, and the benchmarks passed P without the minus sign, which flips every sign. `bio.io.design_targets` builds the target for each method
+- `pygs nestboot -m lasso` and `-m elastic_net` with `--zeta` use each zeta as the penalty, as GeneSPIDER's Glmnet does, instead of cutting one fit at the default penalty. Each gene's path is fitted from the largest penalty down. On K562, penalties below 1e-3 are slow and keep dozens of links per gene; 1e-3 to 0.1 (`--zeta=-3:-1:21`) covers 0 to about 20 links per gene
 
 ### Changed
 - Knockdown labels become -1 in P again, GeneSPIDER's convention for Y = -A⁻¹P, so LSCO returns a negative diagonal and activations as positive links. With +1, every link's sign was reversed, and NestBoot drew its bootstraps in a different order for the same seed

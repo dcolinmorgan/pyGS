@@ -8,9 +8,21 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# sparselink methods whose second fit() argument is a perturbation matrix,
-# not a regression target. LSCO uses A = -P @ pinv(Y).
-PERTURBATION_METHODS = frozenset({"lsco"})
+# Methods fitted to the knockdown design, as GeneSPIDER fits A Y = -P. LSCO
+# negates the design itself (A = -P @ pinv(Y)); the regressions fit X @ A.T = y
+# feature by feature, so they are given y = -P.
+PERTURBATION_METHODS = frozenset({"lsco", "lasso", "ridge", "elastic_net", "prior_lasso"})
+
+
+def design_targets(method: str, P: np.ndarray | None) -> np.ndarray | None:
+    """The ``y`` for ``fit(X, y)`` that makes ``method`` fit A Y = -P.
+
+    ``P`` is samples × genes, like ``X``. Methods that don't use a design get None.
+    """
+    if P is None or method not in PERTURBATION_METHODS:
+        return None
+    P = np.asarray(P, dtype=float)
+    return P if method == "lsco" else -P
 
 
 def detect_format(path: str) -> str:

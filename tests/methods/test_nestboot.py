@@ -283,3 +283,29 @@ def test_nested_fdr_matches_genespider(seed):
     assert res.orig_index == orig_index
     assert np.isclose(res.support, cutoff)
     assert np.array_equal(res.xnet != 0, xnet)
+
+
+def test_forked_processes_match_threads():
+    rng = np.random.default_rng(3)
+    A = np.where(rng.random((6, 6)) < 0.3, rng.normal(0, 0.4, (6, 6)), 0.0)
+    np.fill_diagonal(A, -1.0)
+    P = -np.tile(np.eye(6), 3)
+    ds = Dataset()
+    ds._Y = -np.linalg.solve(A, P) + rng.normal(0, 0.1, (6, 18))
+    ds._P = P
+    ds._network = Network(np.zeros((6, 6)))
+    ds._names = [f"G{i}" for i in range(6)]
+
+    def lsco(data, **kwargs):
+        fit = -data.data.P @ np.linalg.pinv(data.data.Y)
+        return np.stack([np.where(np.abs(fit) > z, fit, 0.0) for z in (0.1, 0.3)], axis=2)
+
+    runs = [
+        Nestboot({"fdr_threshold": 0.1}).run_nestboot(
+            Data(ds), lsco, nest_runs=3, boot_runs=4, seed=7, keep_design=True, processes=n
+        )
+        for n in (0, 2)
+    ]
+    np.testing.assert_array_equal(runs[0].xnet, runs[1].xnet)
+    np.testing.assert_array_equal(runs[0].run_histograms, runs[1].run_histograms)
+    np.testing.assert_array_equal(runs[0].sxnet, runs[1].sxnet)
